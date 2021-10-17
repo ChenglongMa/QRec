@@ -13,7 +13,7 @@ class IterativeRecommender(Recommender):
         super(IterativeRecommender, self).readConfiguration()
         # set the reduced dimension
         self.emb_size = int(self.config['num.factors'])
-        # set maximum epoch
+        # set maximum iteration
         self.maxEpoch = int(self.config['num.max.epoch'])
         # set learning rate
         learningRate = config.LineConfig(self.config['learnRate'])
@@ -28,8 +28,8 @@ class IterativeRecommender(Recommender):
     def printAlgorConfig(self):
         super(IterativeRecommender, self).printAlgorConfig()
         print('Embedding Dimension:', self.emb_size)
-        print('Maximum Epoch:', self.maxEpoch)
-        print('Regularization parameter: regU %.3f, regI %.3f, regB %.3f' %(self.regU,self.regI,self.regB))
+        print('Maximum Iteration:', self.maxEpoch)
+        print('Regularization parameter: regU %.3f, regI %.3f, regB %.3f' % (self.regU, self.regI, self.regB))
         print('='*80)
 
     def initModel(self):
@@ -40,17 +40,17 @@ class IterativeRecommender(Recommender):
     def buildModel_tf(self):
         # initialization
         import tensorflow as tf
-        self.u_idx = tf.placeholder(tf.int32, [None], name="u_idx")
-        self.v_idx = tf.placeholder(tf.int32, [None], name="v_idx")
-        self.r = tf.placeholder(tf.float32, [None], name="rating")
-        self.U = tf.Variable(tf.truncated_normal(shape=[self.num_users, self.emb_size], stddev=0.005), name='U')
-        self.V = tf.Variable(tf.truncated_normal(shape=[self.num_items, self.emb_size], stddev=0.005), name='V')
-        self.user_biases = tf.Variable(tf.truncated_normal(shape=[self.num_users, 1], stddev=0.005), name='U')
-        self.item_biases = tf.Variable(tf.truncated_normal(shape=[self.num_items, 1], stddev=0.005), name='U')
-        self.user_bias = tf.nn.embedding_lookup(self.user_biases, self.u_idx)
-        self.item_bias = tf.nn.embedding_lookup(self.item_biases, self.v_idx)
-        self.user_embedding = tf.nn.embedding_lookup(self.U, self.u_idx)
-        self.item_embedding = tf.nn.embedding_lookup(self.V, self.v_idx)
+        self.u_idx = tf.compat.v1.placeholder(tf.int32, [None], name="u_idx")
+        self.v_idx = tf.compat.v1.placeholder(tf.int32, [None], name="v_idx")
+        self.r = tf.compat.v1.placeholder(tf.float32, [None], name="rating")
+        self.U = tf.Variable(tf.random.truncated_normal(shape=[self.num_users, self.emb_size], stddev=0.005), name='U')
+        self.V = tf.Variable(tf.random.truncated_normal(shape=[self.num_items, self.emb_size], stddev=0.005), name='V')
+        self.user_biases = tf.Variable(tf.random.truncated_normal(shape=[self.num_users, 1], stddev=0.005), name='U')
+        self.item_biases = tf.Variable(tf.random.truncated_normal(shape=[self.num_items, 1], stddev=0.005), name='U')
+        self.user_bias = tf.nn.embedding_lookup(params=self.user_biases, ids=self.u_idx)
+        self.item_bias = tf.nn.embedding_lookup(params=self.item_biases, ids=self.v_idx)
+        self.user_embedding = tf.nn.embedding_lookup(params=self.U, ids=self.u_idx)
+        self.item_embedding = tf.nn.embedding_lookup(params=self.V, ids=self.v_idx)
 
     def updateLearningRate(self,iter):
         if iter > 1:
@@ -85,13 +85,14 @@ class IterativeRecommender(Recommender):
             exit(-1)
         deltaLoss = (self.lastLoss-self.loss)
         if self.ranking.isMainOn():
-            print('%s %s Epoch %d: loss = %.4f, delta_loss = %.5f learning_Rate = %.5f' \
-                  %(self.algorName,self.foldInfo,iter,self.loss,deltaLoss,self.lRate))
+            print('%s %s iteration %d: loss = %.4f, delta_loss = %.5f learning_Rate = %.5f' \
+                  % (self.algorName, self.foldInfo, iter, self.loss, deltaLoss, self.lRate))
             #measure = self.ranking_performance(iter)
         else:
             measure = self.rating_performance()
-            print('%s %s Epoch %d: loss = %.4f, delta_loss = %.5f learning_Rate = %.5f %5s %5s' \
-                  % (self.algorName, self.foldInfo, iter, self.loss, deltaLoss, self.lRate, measure[0].strip()[:11], measure[1].strip()[:12]))
+            print('%s %s iteration %d: loss = %.4f, delta_loss = %.5f learning_Rate = %.5f %5s %5s' \
+                  % (self.algorName, self.foldInfo, iter, self.loss, deltaLoss, self.lRate, measure[0].strip()[:11],
+                     measure[1].strip()[:12]))
         #check if converged
         cond = abs(deltaLoss) < 1e-3
         converged = cond
@@ -112,12 +113,16 @@ class IterativeRecommender(Recommender):
         self.measure = Measure.ratingMeasure(res)
         return self.measure
 
-    def ranking_performance(self,epoch):
-        #for a quick evaluation during training, we rank all items for only 2000 users
-        N = 20
+    def ranking_performance(self, iteration):
+        # for a quick evaluation during training, we rank all items for only 2000 users
+        N = 10
         recList = {}
         testSample = {}
         for user in self.data.testSet_u:
+            if len(testSample) == 2000:
+                break
+            if user not in self.data.trainSet_u:
+                continue
             testSample[user] = self.data.testSet_u[user]
 
         for user in testSample:
@@ -142,11 +147,11 @@ class IterativeRecommender(Recommender):
                 else:
                     count -=1
             if count<0:
-                self.bestPerformance[1]=performance
-                self.bestPerformance[0]=epoch
+                self.bestPerformance[1] = performance
+                self.bestPerformance[0] = iteration
                 self.saveModel()
         else:
-            self.bestPerformance.append(epoch)
+            self.bestPerformance.append(iteration)
             performance = {}
             for m in measure[1:]:
                 k,v = m.strip().split(':')
@@ -157,7 +162,7 @@ class IterativeRecommender(Recommender):
         print('Quick Ranking Performance '+self.foldInfo+' (Top-10 Item Recommendation On 1000 sampled users)')
         measure = [m.strip() for m in measure[1:]]
         print('*Current Performance*')
-        print('Epoch:',str(epoch)+',',' | '.join(measure))
+        print('iteration:', iteration, ' | '.join(measure))
         bp = ''
         # for k in self.bestPerformance[1]:
         #     bp+=k+':'+str(self.bestPerformance[1][k])+' | '
@@ -166,7 +171,7 @@ class IterativeRecommender(Recommender):
         bp += 'F1' + ':' + str(self.bestPerformance[1]['F1']) + ' | '
         bp += 'MDCG' + ':' + str(self.bestPerformance[1]['NDCG'])
         print('*Best Performance* ')
-        print('Epoch:',str(self.bestPerformance[0])+',',bp)
-        print('-'*120)
+        print('iteration:', self.bestPerformance[0], bp)
+        print('-' * 120)
         return measure
 

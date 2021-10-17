@@ -71,21 +71,23 @@ class SocialMF(SocialRecommender):
         indices = [[self.data.user[entry[0]], self.data.user[entry[1]]] for entry in self.social.relation]
         values = [float(entry[2]) / len(self.social.followees[entry[0]]) for entry in self.social.relation]
         social_adj = tf.SparseTensor(indices=indices, values=values, dense_shape=[self.num_users, self.num_users])
-        self.r = tf.placeholder(tf.float32)
-        y = tf.reduce_sum(tf.multiply(self.user_embedding, self.item_embedding), 1)
-        loss = tf.nn.l2_loss(tf.convert_to_tensor(self.r)-y) + self.regU * (tf.nn.l2_loss(self.user_embedding) + tf.nn.l2_loss(self.item_embedding))
-        sr = 1*tf.nn.l2_loss(self.user_embedding-tf.gather(tf.sparse_tensor_dense_matmul(social_adj,self.U),self.u_idx))
-        loss+=sr
-        opt = tf.train.AdamOptimizer(self.lRate)
+        self.r = tf.compat.v1.placeholder(tf.float32)
+        y = tf.reduce_sum(input_tensor=tf.multiply(self.user_embedding, self.item_embedding), axis=1)
+        loss = tf.nn.l2_loss(tf.convert_to_tensor(value=self.r) - y) + self.regU * (
+                    tf.nn.l2_loss(self.user_embedding) + tf.nn.l2_loss(self.item_embedding))
+        sr = 1 * tf.nn.l2_loss(
+            self.user_embedding - tf.gather(tf.sparse.sparse_dense_matmul(social_adj, self.U), self.u_idx))
+        loss += sr
+        opt = tf.compat.v1.train.AdamOptimizer(self.lRate)
         train = opt.minimize(loss)
-        with tf.Session() as sess:
-            init = tf.global_variables_initializer()
+        with tf.compat.v1.Session() as sess:
+            init = tf.compat.v1.global_variables_initializer()
             sess.run(init)
             for epoch in range(self.maxEpoch):
                 for n, batch in enumerate(self.next_batch()):
-                    user_idx, i_idx,ratings = batch
+                    user_idx, i_idx, ratings = batch
                     _, l = sess.run([train, loss],
-                                    feed_dict={self.u_idx: user_idx, self.v_idx: i_idx,self.r:ratings})
+                                    feed_dict={self.u_idx: user_idx, self.v_idx: i_idx, self.r: ratings})
                     print('epoch:', epoch, 'loss:', l)
             self.P, self.Q = sess.run([self.U, self.V])
             import pickle

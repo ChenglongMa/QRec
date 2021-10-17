@@ -28,13 +28,13 @@ class BasicMF(IterativeRecommender):
     def buildModel_tf(self):
         super(BasicMF, self).buildModel_tf()
         import tensorflow as tf
-        self.r_hat = tf.reduce_sum(tf.multiply(self.user_embedding, self.item_embedding), axis=1)
-        self.total_loss = tf.nn.l2_loss(self.r- self.r_hat)
-        self.optimizer = tf.train.AdamOptimizer(self.lRate)
+        self.r_hat = tf.reduce_sum(input_tensor=tf.multiply(self.user_embedding, self.item_embedding), axis=1)
+        self.total_loss = tf.nn.l2_loss(self.r - self.r_hat)
+        self.optimizer = tf.compat.v1.train.AdamOptimizer(self.lRate)
         self.train = self.optimizer.minimize(self.total_loss, var_list=[self.U, self.V])
 
-        with tf.Session() as sess:
-            init = tf.global_variables_initializer()
+        with tf.compat.v1.Session() as sess:
+            init = tf.compat.v1.global_variables_initializer()
             sess.run(init)
             for step in range(self.maxEpoch):
                 batch_size = self.batch_size
@@ -44,7 +44,7 @@ class BasicMF(IterativeRecommender):
                 rating = [self.data.trainingData[idx][2] for idx in batch_idx]
                 sess.run(self.train, feed_dict={self.r: rating, self.u_idx: user_idx, self.v_idx: item_idx})
                 print('epoch:', step, 'loss:', sess.run(self.total_loss,
-                                                            feed_dict={self.r: rating, self.u_idx: user_idx,
+                                                        feed_dict={self.r: rating, self.u_idx: user_idx,
                                                                        self.v_idx: item_idx}))
             self.P = sess.run(self.U)
             self.Q = sess.run(self.V)

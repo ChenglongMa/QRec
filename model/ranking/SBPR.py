@@ -110,29 +110,31 @@ class SBPR(SocialRecommender):
 
     def buildModel_tf(self):
         super(SBPR, self).buildModel_tf()
-        self.social_idx = tf.placeholder(tf.int32, name="social_holder")
-        self.neg_idx = tf.placeholder(tf.int32, name="neg_holder")
-        self.weights = tf.placeholder(tf.float32, name="weights")
-        self.neg_item_embedding = tf.nn.embedding_lookup(self.V, self.neg_idx)
-        self.social_item_embedding = tf.nn.embedding_lookup(self.V, self.social_idx)
-        y_ik = (tf.reduce_sum(tf.multiply(self.user_embedding, self.item_embedding), 1)
-                -tf.reduce_sum(tf.multiply(self.user_embedding, self.social_item_embedding), 1))/(self.weights+1)
-        y_kj = tf.reduce_sum(tf.multiply(self.user_embedding, self.social_item_embedding), 1)\
-               -tf.reduce_sum(tf.multiply(self.user_embedding, self.neg_item_embedding), 1)
-        loss = -tf.reduce_sum(tf.log(tf.sigmoid(y_ik)+1e-6)+ tf.log(tf.sigmoid(y_kj)+1e-6))
+        self.social_idx = tf.compat.v1.placeholder(tf.int32, name="social_holder")
+        self.neg_idx = tf.compat.v1.placeholder(tf.int32, name="neg_holder")
+        self.weights = tf.compat.v1.placeholder(tf.float32, name="weights")
+        self.neg_item_embedding = tf.nn.embedding_lookup(params=self.V, ids=self.neg_idx)
+        self.social_item_embedding = tf.nn.embedding_lookup(params=self.V, ids=self.social_idx)
+        y_ik = (tf.reduce_sum(input_tensor=tf.multiply(self.user_embedding, self.item_embedding), axis=1)
+                - tf.reduce_sum(input_tensor=tf.multiply(self.user_embedding, self.social_item_embedding), axis=1)) / (
+                           self.weights + 1)
+        y_kj = tf.reduce_sum(input_tensor=tf.multiply(self.user_embedding, self.social_item_embedding), axis=1) \
+               - tf.reduce_sum(input_tensor=tf.multiply(self.user_embedding, self.neg_item_embedding), axis=1)
+        loss = -tf.reduce_sum(input_tensor=tf.math.log(tf.sigmoid(y_ik) + 1e-6) + tf.math.log(tf.sigmoid(y_kj) + 1e-6))
         + self.regU * (tf.nn.l2_loss(self.U) + tf.nn.l2_loss(self.V))
-        opt = tf.train.AdamOptimizer(self.lRate)
+        opt = tf.compat.v1.train.AdamOptimizer(self.lRate)
         train = opt.minimize(loss)
-        config = tf.ConfigProto()
+        config = tf.compat.v1.ConfigProto()
         config.gpu_options.allow_growth = True
-        with tf.Session(config=config) as sess:
-            init = tf.global_variables_initializer()
+        with tf.compat.v1.Session(config=config) as sess:
+            init = tf.compat.v1.global_variables_initializer()
             sess.run(init)
             for epoch in range(self.maxEpoch):
                 for n, batch in enumerate(self.next_batch()):
-                    user_idx, i_idx, s_idx,j_idx,weights = batch
+                    user_idx, i_idx, s_idx, j_idx, weights = batch
                     _, l = sess.run([train, loss],
-                                    feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx,self.social_idx:s_idx,self.weights:weights})
+                                    feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx,
+                                               self.social_idx: s_idx, self.weights: weights})
                     print('training:', epoch + 1, 'batch', n, 'loss:', l)
             self.P, self.Q = sess.run([self.U, self.V])
 

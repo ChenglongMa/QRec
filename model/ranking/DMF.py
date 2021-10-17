@@ -46,14 +46,14 @@ class DMF(DeepRecommender):
         n_input_u = len(self.data.item)
         n_input_i = len(self.data.user)
         self.negative_sp = 5
-        self.n_hidden_u=[256,512]
-        self.n_hidden_i=[256,512]
-        self.input_u = tf.placeholder(tf.float, [None, n_input_u])
-        self.input_i = tf.placeholder(tf.float, [None, n_input_i])
+        self.n_hidden_u = [256, 512]
+        self.n_hidden_i = [256, 512]
+        self.input_u = tf.compat.v1.placeholder(tf.float, [None, n_input_u])
+        self.input_i = tf.compat.v1.placeholder(tf.float, [None, n_input_i])
 
     def buildModel(self):
         super(DMF, self).buildModel_tf()
-        initializer = tf.contrib.layers.xavier_initializer()
+        initializer = tf.compat.v1.keras.initializers.VarianceScaling(scale=1.0, mode="fan_avg", distribution="uniform")
         #user net
         user_W1 = tf.Variable(initializer([self.num_items, self.n_hidden_u[0]],stddev=0.01))
         self.user_out = tf.nn.relu(tf.matmul(self.input_u, user_W1))
@@ -64,31 +64,32 @@ class DMF(DeepRecommender):
             self.regLoss = tf.add(self.regLoss,tf.nn.l2_loss(W))
             self.regLoss = tf.add(self.regLoss, tf.nn.l2_loss(b))
             self.user_out = tf.nn.relu(tf.add(tf.matmul(self.user_out, W), b))
-        #item net
-        item_W1 = tf.Variable(initializer([self.num_users, self.n_hidden_i[0]],stddev=0.01))
+        # item net
+        item_W1 = tf.Variable(initializer([self.num_users, self.n_hidden_i[0]], stddev=0.01))
         self.item_out = tf.nn.relu(tf.matmul(self.input_i, item_W1))
         self.regLoss = tf.add(self.regLoss, tf.nn.l2_loss(item_W1))
         for i in range(1, len(self.n_hidden_i)):
-            W = tf.Variable(initializer([self.n_hidden_i[i-1], self.n_hidden_i[i]],stddev=0.01))
-            b = tf.Variable(initializer([self.n_hidden_i[i]],stddev=0.01))
+            W = tf.Variable(initializer([self.n_hidden_i[i - 1], self.n_hidden_i[i]], stddev=0.01))
+            b = tf.Variable(initializer([self.n_hidden_i[i]], stddev=0.01))
             self.regLoss = tf.add(self.regLoss, tf.nn.l2_loss(W))
             self.regLoss = tf.add(self.regLoss, tf.nn.l2_loss(b))
             self.item_out = tf.nn.relu(tf.add(tf.matmul(self.item_out, W), b))
-        norm_user_output = tf.sqrt(tf.reduce_sum(tf.square(self.user_out), axis=1))
-        norm_item_output = tf.sqrt(tf.reduce_sum(tf.square(self.item_out), axis=1))
-        self.y_ = tf.reduce_sum(tf.multiply(self.user_out, self.item_out), axis=1) / (
+        norm_user_output = tf.sqrt(tf.reduce_sum(input_tensor=tf.square(self.user_out), axis=1))
+        norm_item_output = tf.sqrt(tf.reduce_sum(input_tensor=tf.square(self.item_out), axis=1))
+        self.y_ = tf.reduce_sum(input_tensor=tf.multiply(self.user_out, self.item_out), axis=1) / (
                 norm_item_output * norm_user_output)
         self.y_ = tf.maximum(1e-6, self.y_)
-        self.loss = self.r*tf.log(self.y_) + (1 - self.r) * tf.log(1 - self.y_)#tf.nn.sigmoid_cross_entropy_with_logits(logits=self.y_,labels=self.r)
-        #self.loss = tf.nn.l2_loss(tf.subtract(self.y_,self.r))
-        self.loss = -tf.reduce_sum(self.loss)
+        self.loss = self.r * tf.math.log(self.y_) + (1 - self.r) * tf.math.log(
+            1 - self.y_)  # tf.nn.sigmoid_cross_entropy_with_logits(logits=self.y_,labels=self.r)
+        # self.loss = tf.nn.l2_loss(tf.subtract(self.y_,self.r))
+        self.loss = -tf.reduce_sum(input_tensor=self.loss)
         reg_lambda = tf.constant(self.regU, dtype=tf.float32)
-        self.regLoss = tf.multiply(reg_lambda,self.regLoss)
-        self.loss = tf.add(self.loss,self.regLoss)
-        optimizer = tf.train.AdamOptimizer(self.lRate).minimize(self.loss)
+        self.regLoss = tf.multiply(reg_lambda, self.regLoss)
+        self.loss = tf.add(self.loss, self.regLoss)
+        optimizer = tf.compat.v1.train.AdamOptimizer(self.lRate).minimize(self.loss)
         self.U = np.zeros((self.num_users, self.n_hidden_u[-1]))
         self.V = np.zeros((self.num_items, self.n_hidden_u[-1]))
-        init = tf.global_variables_initializer()
+        init = tf.compat.v1.global_variables_initializer()
         self.sess.run(init)
 
         total_batch = int(len(self.data.trainingData)/ self.batch_size)

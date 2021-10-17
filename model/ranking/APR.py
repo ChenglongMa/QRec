@@ -18,31 +18,31 @@ class APR(DeepRecommender):
         self.advEpoch = int(args['-advEpoch'])
 
     def _create_variables(self):
-        #perturbation vectors
+        # perturbation vectors
         self.adv_U = tf.Variable(tf.zeros(shape=[self.num_users, self.emb_size]), dtype=tf.float32, trainable=False)
         self.adv_V = tf.Variable(tf.zeros(shape=[self.num_items, self.emb_size]), dtype=tf.float32, trainable=False)
-        self.neg_idx = tf.placeholder(tf.int32, [None], name="n_idx")
-        self.V_neg_embed = tf.nn.embedding_lookup(self.item_embeddings, self.neg_idx)
-        #parameters
-        self.eps = tf.constant(self.eps,dtype=tf.float32)
-        self.regAdv = tf.constant(self.regAdv,dtype=tf.float32)
+        self.neg_idx = tf.compat.v1.placeholder(tf.int32, [None], name="n_idx")
+        self.V_neg_embed = tf.nn.embedding_lookup(params=self.item_embeddings, ids=self.neg_idx)
+        # parameters
+        self.eps = tf.constant(self.eps, dtype=tf.float32)
+        self.regAdv = tf.constant(self.regAdv, dtype=tf.float32)
 
     def _create_inference(self):
-        result = tf.subtract(tf.reduce_sum(tf.multiply(self.u_embedding, self.v_embedding), 1),
-                                  tf.reduce_sum(tf.multiply(self.u_embedding, self.V_neg_embed), 1))
+        result = tf.subtract(tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.v_embedding), axis=1),
+                             tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.V_neg_embed), axis=1))
         return result
 
     def _create_adv_inference(self):
-        self.U_plus_delta = tf.add(self.u_embedding, tf.nn.embedding_lookup(self.adv_U, self.u_idx))
-        self.V_plus_delta = tf.add(self.v_embedding, tf.nn.embedding_lookup(self.adv_V, self.v_idx))
-        self.V_neg_plus_delta = tf.add(self.V_neg_embed, tf.nn.embedding_lookup(self.adv_V, self.neg_idx))
-        result = tf.subtract(tf.reduce_sum(tf.multiply(self.U_plus_delta, self.V_plus_delta), 1),
-                             tf.reduce_sum(tf.multiply(self.U_plus_delta, self.V_neg_plus_delta), 1))
+        self.U_plus_delta = tf.add(self.u_embedding, tf.nn.embedding_lookup(params=self.adv_U, ids=self.u_idx))
+        self.V_plus_delta = tf.add(self.v_embedding, tf.nn.embedding_lookup(params=self.adv_V, ids=self.v_idx))
+        self.V_neg_plus_delta = tf.add(self.V_neg_embed, tf.nn.embedding_lookup(params=self.adv_V, ids=self.neg_idx))
+        result = tf.subtract(tf.reduce_sum(input_tensor=tf.multiply(self.U_plus_delta, self.V_plus_delta), axis=1),
+                             tf.reduce_sum(input_tensor=tf.multiply(self.U_plus_delta, self.V_neg_plus_delta), axis=1))
         return result
 
     def _create_adversarial(self):
         #get gradients of Delta
-        self.grad_U, self.grad_V = tf.gradients(self.loss_adv, [self.adv_U,self.adv_V])
+        self.grad_U, self.grad_V = tf.gradients(ys=self.loss_adv, xs=[self.adv_U, self.adv_V])
 
         # convert the IndexedSlice Data to Dense Tensor
         self.grad_U_dense = tf.stop_gradient(self.grad_U)
@@ -55,25 +55,26 @@ class APR(DeepRecommender):
 
     def _create_loss(self):
         self.reg_lambda = tf.constant(self.regU, dtype=tf.float32)
-        self.loss = tf.reduce_sum(tf.nn.softplus(-self._create_inference()))
+        self.loss = tf.reduce_sum(input_tensor=tf.nn.softplus(-self._create_inference()))
         self.reg_loss = tf.add(tf.multiply(self.reg_lambda, tf.nn.l2_loss(self.u_embedding)),
                                tf.multiply(self.reg_lambda, tf.nn.l2_loss(self.v_embedding)))
         self.total_loss = tf.add(self.loss, self.reg_loss)
         #loss of adversarial training
-        self.loss_adv = tf.multiply(self.regAdv,tf.reduce_sum(tf.nn.softplus(-self._create_adv_inference())))
-        self.loss_adv = tf.add(self.total_loss,self.loss_adv)
+        self.loss_adv = tf.multiply(self.regAdv,
+                                    tf.reduce_sum(input_tensor=tf.nn.softplus(-self._create_adv_inference())))
+        self.loss_adv = tf.add(self.total_loss, self.loss_adv)
 
     def _create_optimizer(self):
-        self.optimizer = tf.train.AdamOptimizer(self.lRate)
+        self.optimizer = tf.compat.v1.train.AdamOptimizer(self.lRate)
         self.train = self.optimizer.minimize(self.total_loss)
-        self.optimizer_adv = tf.train.AdamOptimizer(self.lRate)
+        self.optimizer_adv = tf.compat.v1.train.AdamOptimizer(self.lRate)
         self.train_adv = self.optimizer.minimize(self.loss_adv)
 
 
     def initModel(self):
         super(APR, self).initModel()
-        self.u_embedding = tf.nn.embedding_lookup(self.user_embeddings, self.u_idx)
-        self.v_embedding = tf.nn.embedding_lookup(self.item_embeddings, self.v_idx)
+        self.u_embedding = tf.nn.embedding_lookup(params=self.user_embeddings, ids=self.u_idx)
+        self.v_embedding = tf.nn.embedding_lookup(params=self.item_embeddings, ids=self.v_idx)
         self._create_variables()
         self._create_loss()
         self._create_adversarial()
@@ -96,17 +97,17 @@ class APR(DeepRecommender):
 
         return user_idx,item_idx,neg_item_idx
 
-
     def buildModel(self):
-        with tf.Session() as sess:
-            init = tf.global_variables_initializer()
+        with tf.compat.v1.Session() as sess:
+            init = tf.compat.v1.global_variables_initializer()
             sess.run(init)
             # pretraining
             print('pretraining...')
             for epoch in range(self.maxEpoch // 2):
                 for iteration, batch in enumerate(self.next_batch_pairwise()):
                     user_idx, i_idx, j_idx = batch
-                    _,loss = sess.run([self.train,self.total_loss],feed_dict={self.u_idx: user_idx, self.v_idx: i_idx, self.neg_idx:j_idx})
+                    _, loss = sess.run([self.train, self.total_loss],
+                                       feed_dict={self.u_idx: user_idx, self.v_idx: i_idx, self.neg_idx: j_idx})
 
             # start adversarial training
             print('adversarial training...')

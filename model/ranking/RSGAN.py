@@ -10,8 +10,8 @@ from util.qmath import cosine
 
 def gumbel_softmax(logits, temperature=0.2):
     eps = 1e-20
-    u = tf.random_uniform(tf.shape(logits), minval=0, maxval=1)
-    gumbel_noise = -tf.log(-tf.log(u + eps) + eps)
+    u = tf.random.uniform(tf.shape(input=logits), minval=0, maxval=1)
+    gumbel_noise = -tf.math.log(-tf.math.log(u + eps) + eps)
     y = logits + gumbel_noise
     return tf.nn.softmax(y / temperature)
 
@@ -232,17 +232,18 @@ class RSGAN(SocialRecommender,DeepRecommender):
         indices = [[self.data.item[item[1]], self.data.user[item[0]]] for item in self.data.trainingData]
         values = [item[2] for item in self.data.trainingData]
         self.i_u_matrix = tf.SparseTensor(indices=indices, values=values, dense_shape=[self.num_items, self.num_users])
-        self.pos = tf.placeholder(tf.int32, name="positive_item")
-        self.fnd = tf.placeholder(tf.int32, name="friend_item")
-        self.neg = tf.placeholder(tf.int32, name="neg_holder")
-        self.i = tf.placeholder(tf.int32, name="item_holder")
+        self.pos = tf.compat.v1.placeholder(tf.int32, name="positive_item")
+        self.fnd = tf.compat.v1.placeholder(tf.int32, name="friend_item")
+        self.neg = tf.compat.v1.placeholder(tf.int32, name="neg_holder")
+        self.i = tf.compat.v1.placeholder(tf.int32, name="item_holder")
 
-        with tf.name_scope("generator"):
-            #CDAE
-            initializer = tf.contrib.layers.xavier_initializer()
-            self.X = tf.placeholder(tf.float32, [None, self.num_users])
+        with tf.compat.v1.name_scope("generator"):
+            # CDAE
+            initializer = tf.compat.v1.keras.initializers.VarianceScaling(scale=1.0, mode="fan_avg",
+                                                                          distribution="uniform")
+            self.X = tf.compat.v1.placeholder(tf.float32, [None, self.num_users])
             self.V = tf.Variable(initializer([self.num_users, 200]))
-            chosen_user_embeddings = tf.nn.embedding_lookup(self.V,self.u_idx)
+            chosen_user_embeddings = tf.nn.embedding_lookup(params=self.V, ids=self.u_idx)
 
             self.weights = {
                 'encoder': tf.Variable(initializer([self.num_users, 200])),
@@ -253,56 +254,65 @@ class RSGAN(SocialRecommender,DeepRecommender):
                 'decoder': tf.Variable(initializer([self.num_users])),
             }
 
-            self.g_params = [self.weights, self.biases,self.V]
+            self.g_params = [self.weights, self.biases, self.V]
 
-            layer = tf.nn.sigmoid(tf.matmul(self.X, self.weights['encoder']) + self.biases['encoder']+chosen_user_embeddings)
+            layer = tf.nn.sigmoid(
+                tf.matmul(self.X, self.weights['encoder']) + self.biases['encoder'] + chosen_user_embeddings)
             self.g_output = tf.nn.sigmoid(tf.matmul(layer, self.weights['decoder']) + self.biases['decoder'])
 
             self.y_pred = tf.multiply(self.X, self.g_output)
             self.y_pred = tf.maximum(1e-6, self.y_pred)
 
-            cross_entropy = -tf.multiply(self.X, tf.log(self.y_pred)) - tf.multiply((1 - self.X),
-                                                                                    tf.log(1 - self.y_pred))
-            self.reconstruction = tf.reduce_sum(cross_entropy) + self.regU * (
+            cross_entropy = -tf.multiply(self.X, tf.math.log(self.y_pred)) - tf.multiply((1 - self.X),
+                                                                                         tf.math.log(1 - self.y_pred))
+            self.reconstruction = tf.reduce_sum(input_tensor=cross_entropy) + self.regU * (
                     tf.nn.l2_loss(self.weights['encoder']) + tf.nn.l2_loss(self.weights['decoder']) +
                     tf.nn.l2_loss(self.biases['encoder']) + tf.nn.l2_loss(self.biases['decoder']))
-            g_pre = tf.train.AdamOptimizer(self.lRate)
+            g_pre = tf.compat.v1.train.AdamOptimizer(self.lRate)
             self.g_pretrain = g_pre.minimize(self.reconstruction, var_list=self.g_params)
 
-        with tf.variable_scope('discriminator'):
-            self.item_selection = tf.get_variable('item_selection',initializer=tf.constant_initializer(0.01),shape=[self.num_users, self.num_items])
+        with tf.compat.v1.variable_scope('discriminator'):
+            self.item_selection = tf.compat.v1.get_variable('item_selection',
+                                                            initializer=tf.compat.v1.constant_initializer(0.01),
+                                                            shape=[self.num_users, self.num_items])
             self.g_params.append(self.item_selection)
             self.d_params = [self.user_embeddings, self.item_embeddings]
             # placeholder definition
-            self.u_embedding = tf.nn.embedding_lookup(self.user_embeddings, self.u_idx,name='u_e')
-            self.i_embedding = tf.nn.embedding_lookup(self.item_embeddings, self.pos,name='i_e')
-            self.j_embedding = tf.nn.embedding_lookup(self.item_embeddings, self.neg,name='j_e')
-            #generate virtual friends by gumbel-softmax
-            self.virtualFriends = self.sampling(self.g_output) #one-hot
-            #get candidate list (items)
-            self.candidateItems = tf.transpose(tf.sparse_tensor_dense_matmul(self.i_u_matrix,tf.transpose(self.virtualFriends)))
-            self.embedding_selection = tf.nn.embedding_lookup(self.item_selection, self.u_idx,name='e_s')
-            self.virtual_items = self.sampling(tf.multiply(self.candidateItems,self.embedding_selection))
-            self.v_i_embedding = tf.matmul(self.virtual_items,self.item_embeddings,transpose_a=False,transpose_b=False)
-            y_us = tf.reduce_sum(tf.multiply(self.u_embedding,self.i_embedding),1)\
-                                 -tf.reduce_sum(tf.multiply(self.u_embedding,self.j_embedding),1)
-            self.d_pretrain_loss = -tf.reduce_sum(tf.log(tf.sigmoid(y_us)))+self.regU*(tf.nn.l2_loss(self.u_embedding)+
-                                                                                       tf.nn.l2_loss(self.j_embedding)+
-                                                                                       tf.nn.l2_loss(self.i_embedding))
-            y_uf = tf.reduce_sum(tf.multiply(self.u_embedding, self.i_embedding), 1) - \
-                 tf.reduce_sum(tf.multiply(self.u_embedding, self.v_i_embedding), 1)
-            y_fs = tf.reduce_sum(tf.multiply(self.u_embedding, self.v_i_embedding), 1)-\
-                 tf.reduce_sum(tf.multiply(self.u_embedding, self.j_embedding), 1)
-            self.d_loss = -tf.reduce_sum(tf.log(tf.sigmoid(y_uf)))-tf.reduce_sum(tf.log(tf.sigmoid(y_fs)))+\
-                          self.regU*(tf.nn.l2_loss(self.u_embedding)+tf.nn.l2_loss(self.i_embedding)+tf.nn.l2_loss(self.j_embedding))            #
-            self.g_loss = 30*tf.reduce_sum(y_uf) #better performance
-            d_pre = tf.train.AdamOptimizer(self.lRate)
+            self.u_embedding = tf.nn.embedding_lookup(params=self.user_embeddings, ids=self.u_idx, name='u_e')
+            self.i_embedding = tf.nn.embedding_lookup(params=self.item_embeddings, ids=self.pos, name='i_e')
+            self.j_embedding = tf.nn.embedding_lookup(params=self.item_embeddings, ids=self.neg, name='j_e')
+            # generate virtual friends by gumbel-softmax
+            self.virtualFriends = self.sampling(self.g_output)  # one-hot
+            # get candidate list (items)
+            self.candidateItems = tf.transpose(
+                a=tf.sparse.sparse_dense_matmul(self.i_u_matrix, tf.transpose(a=self.virtualFriends)))
+            self.embedding_selection = tf.nn.embedding_lookup(params=self.item_selection, ids=self.u_idx, name='e_s')
+            self.virtual_items = self.sampling(tf.multiply(self.candidateItems, self.embedding_selection))
+            self.v_i_embedding = tf.matmul(self.virtual_items, self.item_embeddings, transpose_a=False,
+                                           transpose_b=False)
+            y_us = tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.i_embedding), axis=1) \
+                   - tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.j_embedding), axis=1)
+            self.d_pretrain_loss = -tf.reduce_sum(input_tensor=tf.math.log(tf.sigmoid(y_us))) + self.regU * (
+                        tf.nn.l2_loss(self.u_embedding) +
+                        tf.nn.l2_loss(self.j_embedding) +
+                        tf.nn.l2_loss(self.i_embedding))
+            y_uf = tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.i_embedding), axis=1) - \
+                   tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.v_i_embedding), axis=1)
+            y_fs = tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.v_i_embedding), axis=1) - \
+                   tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.j_embedding), axis=1)
+            self.d_loss = -tf.reduce_sum(input_tensor=tf.math.log(tf.sigmoid(y_uf))) - tf.reduce_sum(
+                input_tensor=tf.math.log(tf.sigmoid(y_fs))) + \
+                          self.regU * (
+                                      tf.nn.l2_loss(self.u_embedding) + tf.nn.l2_loss(self.i_embedding) + tf.nn.l2_loss(
+                                  self.j_embedding))  #
+            self.g_loss = 30 * tf.reduce_sum(input_tensor=y_uf)  # better performance
+            d_pre = tf.compat.v1.train.AdamOptimizer(self.lRate)
             self.d_pretrain = d_pre.minimize(self.d_pretrain_loss, var_list=self.d_params)
-            self.d_output = tf.reduce_sum(tf.multiply(self.u_embedding, self.item_embeddings),1)
-        d_opt = tf.train.AdamOptimizer(self.lRate)
-        self.d_update = d_opt.minimize(self.d_loss,var_list=self.d_params)
-        g_opt = tf.train.AdamOptimizer(self.lRate)
-        self.g_update = g_opt.minimize(self.g_loss,var_list=self.g_params)
+            self.d_output = tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.item_embeddings), axis=1)
+        d_opt = tf.compat.v1.train.AdamOptimizer(self.lRate)
+        self.d_update = d_opt.minimize(self.d_loss, var_list=self.d_params)
+        g_opt = tf.compat.v1.train.AdamOptimizer(self.lRate)
+        self.g_update = g_opt.minimize(self.g_loss, var_list=self.g_params)
 
     def next_batch_g(self):
         userList = list(self.data.user.keys())
@@ -337,7 +347,7 @@ class RSGAN(SocialRecommender,DeepRecommender):
 
     def buildModel(self):
         # minimax training
-        init = tf.global_variables_initializer()
+        init = tf.compat.v1.global_variables_initializer()
         self.sess.run(init)
         # pretraining
         print('pretraining for generator...')

@@ -45,15 +45,17 @@ class CFGAN(DeepRecommender):
 
     def initModel(self):
         super(CFGAN, self).initModel()
-        G_regularizer = tf.contrib.layers.l2_regularizer(scale=0.001)
-        D_regularizer = tf.contrib.layers.l2_regularizer(scale=0.001)
-        xavier_init = tf.contrib.layers.xavier_initializer()
+        G_regularizer = tf.keras.regularizers.l2(l=0.5 * (0.001))
+        D_regularizer = tf.keras.regularizers.l2(l=0.5 * (0.001))
+        xavier_init = tf.compat.v1.keras.initializers.VarianceScaling(scale=1.0, mode="fan_avg", distribution="uniform")
 
-        with tf.variable_scope("Generator"):
+        with tf.compat.v1.variable_scope("Generator"):
             # Generator Net
-            self.C = tf.placeholder(tf.float32, shape=[None, self.num_items], name='C')
-            G_W1 = tf.get_variable(name='G_W1',initializer=xavier_init([self.num_items,self.num_items]), regularizer=G_regularizer)
-            G_b1 = tf.get_variable(name='G_b1',initializer=tf.zeros(shape=[self.num_items]), regularizer=G_regularizer)
+            self.C = tf.compat.v1.placeholder(tf.float32, shape=[None, self.num_items], name='C')
+            G_W1 = tf.compat.v1.get_variable(name='G_W1', initializer=xavier_init([self.num_items, self.num_items]),
+                                             regularizer=G_regularizer)
+            G_b1 = tf.compat.v1.get_variable(name='G_b1', initializer=tf.zeros(shape=[self.num_items]),
+                                             regularizer=G_regularizer)
 
             # G_W2 = tf.get_variable(name='G_W2',initializer=xavier_init([300,200]), regularizer=G_regularizer)
             # G_b2 = tf.get_variable(name='G_b2',initializer=tf.zeros(shape=[200]), regularizer=G_regularizer)
@@ -61,13 +63,14 @@ class CFGAN(DeepRecommender):
             # G_W3 = tf.get_variable(initializer=xavier_init([200,self.num_items]), name='G_W3',regularizer=G_regularizer)
             # G_b3 = tf.get_variable(initializer=tf.zeros(shape=[self.num_items]), name='G_b3',regularizer=G_regularizer)
 
-            theta_G = [G_W1, G_b1]#G_W2, G_W3, G_b1, G_b2, G_b3]
+            theta_G = [G_W1, G_b1]  # G_W2, G_W3, G_b1, G_b2, G_b3]
 
-        with tf.variable_scope("Discriminator"):
+        with tf.compat.v1.variable_scope("Discriminator"):
             # Discriminator Net
-            self.X = tf.placeholder(tf.float32, shape=[None, self.num_items], name='X')
-            D_W1 = tf.get_variable(initializer=xavier_init([self.num_items*2,1]), name='D_W1',regularizer=D_regularizer)
-            D_b1 = tf.get_variable(initializer=tf.zeros(shape=[1]), name='D_b1',regularizer=D_regularizer)
+            self.X = tf.compat.v1.placeholder(tf.float32, shape=[None, self.num_items], name='X')
+            D_W1 = tf.compat.v1.get_variable(initializer=xavier_init([self.num_items * 2, 1]), name='D_W1',
+                                             regularizer=D_regularizer)
+            D_b1 = tf.compat.v1.get_variable(initializer=tf.zeros(shape=[1]), name='D_b1', regularizer=D_regularizer)
 
             # D_W2 = tf.get_variable(name='D_W2', initializer=xavier_init([300, 200]), regularizer=D_regularizer)
             # D_b2 = tf.get_variable(name='D_b2', initializer=tf.zeros(shape=[200]), regularizer=D_regularizer)
@@ -75,17 +78,17 @@ class CFGAN(DeepRecommender):
             # D_W3 = tf.get_variable(initializer=xavier_init([200,1]), name='D_W3',regularizer=D_regularizer)
             # D_b3 = tf.get_variable(initializer=tf.zeros(shape=[1]), name='D_b3',regularizer=D_regularizer)
 
-            theta_D = [D_W1, D_b1]#D_W2, D_W3, D_b1, D_b2, D_b3]
+            theta_D = [D_W1, D_b1]  # D_W2, D_W3, D_b1, D_b2, D_b3]
 
-        self.mask = tf.placeholder(tf.float32, shape=[None, self.num_items], name='mask')
-        self.N_zr = tf.placeholder(tf.float32, shape=[None, self.num_items], name='mask')
+        self.mask = tf.compat.v1.placeholder(tf.float32, shape=[None, self.num_items], name='mask')
+        self.N_zr = tf.compat.v1.placeholder(tf.float32, shape=[None, self.num_items], name='mask')
 
-        #inference
+        # inference
         def generator():
             r_hat = tf.nn.sigmoid(tf.matmul(self.C, G_W1) + G_b1)
             # G_h2 = tf.nn.relu(tf.matmul(G_h1, G_W2) + G_b2)
             # r_hat = tf.nn.sigmoid(tf.matmul(G_h2, G_W3) + G_b3)
-            fake_data = tf.multiply(r_hat,self.mask)
+            fake_data = tf.multiply(r_hat, self.mask)
             return fake_data
 
         def discriminator(x):
@@ -99,21 +102,23 @@ class CFGAN(DeepRecommender):
             # G_h2 = tf.nn.relu(tf.matmul(G_h1, G_W2) + G_b2)
             # r_hat = tf.nn.sigmoid(tf.matmul(G_h2, G_W3) + G_b3)
             return r_hat
+
         G_sample = generator()
         self.r_hat = r_hat()
-        D_real = discriminator(tf.concat([self.C,self.C],1))
-        D_fake = discriminator(tf.concat([G_sample,self.C],1))
-        self.D_loss = -tf.reduce_mean(tf.log(D_real+10e-5) + tf.log(1. - D_fake+10e-5))
-        self.G_loss = tf.reduce_mean(tf.log(1.-D_fake+10e-5)+self.alpha*tf.nn.l2_loss(tf.multiply(self.N_zr,G_sample)))
+        D_real = discriminator(tf.concat([self.C, self.C], 1))
+        D_fake = discriminator(tf.concat([G_sample, self.C], 1))
+        self.D_loss = -tf.reduce_mean(input_tensor=tf.math.log(D_real + 10e-5) + tf.math.log(1. - D_fake + 10e-5))
+        self.G_loss = tf.reduce_mean(input_tensor=tf.math.log(1. - D_fake + 10e-5) + self.alpha * tf.nn.l2_loss(
+            tf.multiply(self.N_zr, G_sample)))
 
         # Only update D(X)'s parameters, so var_list = theta_D
-        self.D_solver = tf.train.AdamOptimizer(self.lRate).minimize(self.D_loss, var_list=theta_D)
+        self.D_solver = tf.compat.v1.train.AdamOptimizer(self.lRate).minimize(self.D_loss, var_list=theta_D)
         # Only update G(X)'s parameters, so var_list = theta_G
-        self.G_solver = tf.train.AdamOptimizer(self.lRate).minimize(self.G_loss, var_list=theta_G)
+        self.G_solver = tf.compat.v1.train.AdamOptimizer(self.lRate).minimize(self.G_loss, var_list=theta_G)
 
 
     def buildModel(self):
-        init = tf.global_variables_initializer()
+        init = tf.compat.v1.global_variables_initializer()
         self.sess.run(init)
         print('pretraining...')
         print('training...')

@@ -45,7 +45,7 @@ class CHER(DeepRecommender):
         super(CHER, self).initModel()
         # self.user_embeddings = self.user_embeddings/2
         # self.item_embeddings = self.item_embeddings/2
-        self.ssl_rate = tf.placeholder(tf.float32)
+        self.ssl_rate = tf.compat.v1.placeholder(tf.float32)
         self.adv_U = tf.Variable(tf.zeros(shape=[self.num_users, self.emb_size]), dtype=tf.float32)
         self.adv_V = tf.Variable(tf.zeros(shape=[self.num_items, self.emb_size]), dtype=tf.float32)
         # self.random_noises_U = tf.placeholder(tf.float32)
@@ -69,28 +69,32 @@ class CHER(DeepRecommender):
         p_all_embeddings = [p_ego_embeddings]
         n_all_embeddings = [n_ego_embeddings]
         for k in range(self.n_layers):
-            ego_embeddings = tf.sparse_tensor_dense_matmul(self.norm_adj,ego_embeddings)
-            n_ego_embeddings = tf.sparse_tensor_dense_matmul(self.norm_adj,n_ego_embeddings)
+            ego_embeddings = tf.sparse.sparse_dense_matmul(self.norm_adj, ego_embeddings)
+            n_ego_embeddings = tf.sparse.sparse_dense_matmul(self.norm_adj, n_ego_embeddings)
             random_noise = tf.random.normal(n_ego_embeddings.shape)
-            n_ego_embeddings +=  tf.multiply(tf.math.sign(n_ego_embeddings),tf.nn.l2_normalize(random_noise, 1) * self.eps)
-            p_ego_embeddings = tf.sparse_tensor_dense_matmul(self.norm_adj,p_ego_embeddings)
-            #all_embeddings += [ego_embeddings]
-        #     # normalize the distribution of embeddings.
+            n_ego_embeddings += tf.multiply(tf.math.sign(n_ego_embeddings),
+                                            tf.nn.l2_normalize(random_noise, 1) * self.eps)
+            p_ego_embeddings = tf.sparse.sparse_dense_matmul(self.norm_adj, p_ego_embeddings)
+            # all_embeddings += [ego_embeddings]
+            #     # normalize the distribution of embeddings.
             norm_embeddings = tf.math.l2_normalize(ego_embeddings, axis=1)
-            all_embeddings += [ego_embeddings] #converge faster
+            all_embeddings += [ego_embeddings]  # converge faster
 
             norm_embeddings = tf.math.l2_normalize(n_ego_embeddings, axis=1)
-            n_all_embeddings += [n_ego_embeddings] #converge faster
+            n_all_embeddings += [n_ego_embeddings]  # converge faster
             #
             # norm_embeddings = tf.math.l2_normalize(n_ego_embeddings, axis=1)
             p_all_embeddings += [p_ego_embeddings] #converge faster
         #
-        all_embeddings = tf.reduce_mean(all_embeddings, axis=0)
-        self.main_user_embeddings, self.main_item_embeddings = tf.split(all_embeddings, [self.num_users, self.num_items], 0)
-        n_all_embeddings = tf.reduce_mean(n_all_embeddings, axis=0)
-        self.noised_user_embeddings, self.noised_item_embeddings = tf.split(n_all_embeddings,[self.num_users, self.num_items], 0)
-        p_all_embeddings = tf.reduce_mean(p_all_embeddings, axis=0)
-        self.perturbed_user_embeddings, self.perturbed_item_embeddings = tf.split(p_all_embeddings,[self.num_users, self.num_items], 0)
+        all_embeddings = tf.reduce_mean(input_tensor=all_embeddings, axis=0)
+        self.main_user_embeddings, self.main_item_embeddings = tf.split(all_embeddings,
+                                                                        [self.num_users, self.num_items], 0)
+        n_all_embeddings = tf.reduce_mean(input_tensor=n_all_embeddings, axis=0)
+        self.noised_user_embeddings, self.noised_item_embeddings = tf.split(n_all_embeddings,
+                                                                            [self.num_users, self.num_items], 0)
+        p_all_embeddings = tf.reduce_mean(input_tensor=p_all_embeddings, axis=0)
+        self.perturbed_user_embeddings, self.perturbed_item_embeddings = tf.split(p_all_embeddings,
+                                                                                  [self.num_users, self.num_items], 0)
 
         # noise_u = tf.random.normal(self.adv_U.shape)
         # noise_i = tf.random.normal(self.adv_V.shape)
@@ -102,11 +106,11 @@ class CHER(DeepRecommender):
         # self.noised_item_embeddings = self.main_item_embeddings + noises_i  # perburbed_V
         # self.perturbed_user_embeddings = self.noised_user_embeddings+self.adv_U
         # self.perturbed_item_embeddings = self.noised_item_embeddings+self.adv_V
-        #self._create_perburbed_inference()
-        self.neg_idx = tf.placeholder(tf.int32, name="neg_holder")
-        self.neg_item_embedding = tf.nn.embedding_lookup(self.main_item_embeddings, self.neg_idx)
-        self.u_embedding = tf.nn.embedding_lookup(self.main_user_embeddings, self.u_idx)
-        self.v_embedding = tf.nn.embedding_lookup(self.main_item_embeddings, self.v_idx)
+        # self._create_perburbed_inference()
+        self.neg_idx = tf.compat.v1.placeholder(tf.int32, name="neg_holder")
+        self.neg_item_embedding = tf.nn.embedding_lookup(params=self.main_item_embeddings, ids=self.neg_idx)
+        self.u_embedding = tf.nn.embedding_lookup(params=self.main_user_embeddings, ids=self.u_idx)
+        self.v_embedding = tf.nn.embedding_lookup(params=self.main_item_embeddings, ids=self.v_idx)
 
     def saveModel(self):
         self.bestU, self.bestV = self.sess.run([self.main_user_embeddings, self.main_item_embeddings])
@@ -114,10 +118,10 @@ class CHER(DeepRecommender):
     def calc_ssl_loss(self):
         # user_emb = tf.nn.embedding_lookup(self.main_user_embeddings, tf.unique(self.u_idx)[0])
         # item_emb = tf.nn.embedding_lookup(self.main_item_embeddings, tf.unique(self.v_idx)[0])
-        perturbed_user_emb = tf.nn.embedding_lookup(self.perturbed_user_embeddings, tf.unique(self.u_idx)[0])
-        perturbed_item_emb = tf.nn.embedding_lookup(self.perturbed_item_embeddings, tf.unique(self.v_idx)[0])
-        user_emb = tf.nn.embedding_lookup(self.noised_user_embeddings, tf.unique(self.u_idx)[0])
-        item_emb = tf.nn.embedding_lookup(self.noised_item_embeddings, tf.unique(self.v_idx)[0])
+        perturbed_user_emb = tf.nn.embedding_lookup(params=self.perturbed_user_embeddings, ids=tf.unique(self.u_idx)[0])
+        perturbed_item_emb = tf.nn.embedding_lookup(params=self.perturbed_item_embeddings, ids=tf.unique(self.v_idx)[0])
+        user_emb = tf.nn.embedding_lookup(params=self.noised_user_embeddings, ids=tf.unique(self.u_idx)[0])
+        item_emb = tf.nn.embedding_lookup(params=self.noised_item_embeddings, ids=tf.unique(self.v_idx)[0])
         # emb_merge1 = tf.concat([user_emb, item_emb], axis=0)
         # emb_merge2 = tf.concat([perturbed_user_emb, perturbed_item_emb], axis=0)
         #
@@ -129,18 +133,19 @@ class CHER(DeepRecommender):
         normalize_emb_item = tf.nn.l2_normalize(item_emb, 1)
         normalize_emb_item_p = tf.nn.l2_normalize(perturbed_item_emb, 1)
 
-        pos_score_u = tf.reduce_sum(tf.multiply(normalize_emb_user, normalize_emb_user_p), axis=1)
-        pos_score_i = tf.reduce_sum(tf.multiply(normalize_emb_item, normalize_emb_item_p), axis=1)
+        pos_score_u = tf.reduce_sum(input_tensor=tf.multiply(normalize_emb_user, normalize_emb_user_p), axis=1)
+        pos_score_i = tf.reduce_sum(input_tensor=tf.multiply(normalize_emb_item, normalize_emb_item_p), axis=1)
         # self.pos_score = pos_score
         ttl_score_u = tf.matmul(normalize_emb_user, normalize_emb_user_p, transpose_a=False, transpose_b=True)
         ttl_score_i = tf.matmul(normalize_emb_item, normalize_emb_item_p, transpose_a=False, transpose_b=True)
-        #ttl_score = tf.concat([ttl_score,tf.reshape(pos_score,(tf.shape(pos_score)[0],1))],1)
-        pos_score_u = tf.exp(pos_score_u /0.2)
-        ttl_score_u = tf.reduce_sum(tf.exp(ttl_score_u /0.2), axis=1)
-        pos_score_i = tf.exp(pos_score_i /0.2)
-        ttl_score_i = tf.reduce_sum(tf.exp(ttl_score_i /0.2), axis=1)
-        ssl_loss = -tf.reduce_sum(tf.log(pos_score_u / ttl_score_u)) -tf.reduce_sum(tf.log(pos_score_i / ttl_score_i))
-        return self.ssl_rate*ssl_loss
+        # ttl_score = tf.concat([ttl_score,tf.reshape(pos_score,(tf.shape(pos_score)[0],1))],1)
+        pos_score_u = tf.exp(pos_score_u / 0.2)
+        ttl_score_u = tf.reduce_sum(input_tensor=tf.exp(ttl_score_u / 0.2), axis=1)
+        pos_score_i = tf.exp(pos_score_i / 0.2)
+        ttl_score_i = tf.reduce_sum(input_tensor=tf.exp(ttl_score_i / 0.2), axis=1)
+        ssl_loss = -tf.reduce_sum(input_tensor=tf.math.log(pos_score_u / ttl_score_u)) - tf.reduce_sum(
+            input_tensor=tf.math.log(pos_score_i / ttl_score_i))
+        return self.ssl_rate * ssl_loss
 
     # def calc_ssl_loss(self):
     #     n_user_emb = tf.nn.embedding_lookup(self.perturbed_user_embeddings, tf.unique(self.u_idx)[0])
@@ -165,20 +170,21 @@ class CHER(DeepRecommender):
     #     return self.ssl_rate*ssl_loss
 
     def buildModel(self):
-        #self._create_perburbed_inference()
-        #self.ssl_loss = self.calc_ssl_loss()
+        # self._create_perburbed_inference()
+        # self.ssl_loss = self.calc_ssl_loss()
         self.perturbed_ssl_loss = self.calc_ssl_loss()
-        #main task: recommendation
-        y = tf.reduce_sum(tf.multiply(self.u_embedding, self.v_embedding), 1) \
-            - tf.reduce_sum(tf.multiply(self.u_embedding, self.neg_item_embedding), 1)
-        rec_loss = -tf.reduce_sum(tf.log(tf.sigmoid(y))) + self.regU * (tf.nn.l2_loss(self.user_embeddings) + tf.nn.l2_loss(self.item_embeddings))
-        #SSL task: contrastive learning
-        #con_loss = self._create_uniform_noise()
+        # main task: recommendation
+        y = tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.v_embedding), axis=1) \
+            - tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.neg_item_embedding), axis=1)
+        rec_loss = -tf.reduce_sum(input_tensor=tf.math.log(tf.sigmoid(y))) + self.regU * (
+                    tf.nn.l2_loss(self.user_embeddings) + tf.nn.l2_loss(self.item_embeddings))
+        # SSL task: contrastive learning
+        # con_loss = self._create_uniform_noise()
         loss = rec_loss + self.perturbed_ssl_loss
-        opt = tf.train.AdamOptimizer(self.lRate)
+        opt = tf.compat.v1.train.AdamOptimizer(self.lRate)
         train = opt.minimize(loss)
 
-        init = tf.global_variables_initializer()
+        init = tf.compat.v1.global_variables_initializer()
         self.sess.run(init)
         for epoch in range(self.maxEpoch):
             for n, batch in enumerate(self.next_batch_pairwise()):

@@ -23,16 +23,16 @@ class BUIR(DeepRecommender):
 
     def _create_variable(self):
         self.sub_mat = {}
-        self.sub_mat['adj_values_sub_o'] = tf.placeholder(tf.float32)
-        self.sub_mat['adj_indices_sub_o'] = tf.placeholder(tf.int64)
-        self.sub_mat['adj_shape_sub_o'] = tf.placeholder(tf.int64)
+        self.sub_mat['adj_values_sub_o'] = tf.compat.v1.placeholder(tf.float32)
+        self.sub_mat['adj_indices_sub_o'] = tf.compat.v1.placeholder(tf.int64)
+        self.sub_mat['adj_shape_sub_o'] = tf.compat.v1.placeholder(tf.int64)
         self.sub_mat['sub_mat_o'] = tf.SparseTensor(
             self.sub_mat['adj_indices_sub_o'],
             self.sub_mat['adj_values_sub_o'],
             self.sub_mat['adj_shape_sub_o'])
-        self.sub_mat['adj_values_sub_t'] = tf.placeholder(tf.float32)
-        self.sub_mat['adj_indices_sub_t'] = tf.placeholder(tf.int64)
-        self.sub_mat['adj_shape_sub_t'] = tf.placeholder(tf.int64)
+        self.sub_mat['adj_values_sub_t'] = tf.compat.v1.placeholder(tf.float32)
+        self.sub_mat['adj_indices_sub_t'] = tf.compat.v1.placeholder(tf.int64)
+        self.sub_mat['adj_shape_sub_t'] = tf.compat.v1.placeholder(tf.int64)
         self.sub_mat['sub_mat_t'] = tf.SparseTensor(
             self.sub_mat['adj_indices_sub_t'],
             self.sub_mat['adj_values_sub_t'],
@@ -77,7 +77,7 @@ class BUIR(DeepRecommender):
     def initModel(self):
         super(BUIR, self).initModel()
         self._create_variable()
-        initializer = tf.contrib.layers.xavier_initializer()
+        initializer = tf.compat.v1.keras.initializers.VarianceScaling(scale=1.0, mode="fan_avg", distribution="uniform")
         self.online_mat = tf.Variable(initializer([self.emb_size, self.emb_size]))
         self.online_bias = tf.Variable(initializer([1, self.emb_size]))
         self.online_user_embeddings = tf.Variable(initializer(shape=[self.num_users, self.emb_size]), name='U')
@@ -92,50 +92,59 @@ class BUIR(DeepRecommender):
         #multi-view convolution: LightGCN structure
         for k in range(self.n_layers):
             # online encoder
-            online_embeddings = tf.sparse_tensor_dense_matmul(self.sub_mat['sub_mat_o'], online_embeddings)
+            online_embeddings = tf.sparse.sparse_dense_matmul(self.sub_mat['sub_mat_o'], online_embeddings)
             #norm_embeddings = tf.math.l2_normalize(online_embeddings, axis=1)
             all_online_embeddings += [online_embeddings]
             # target encoder
-            target_embeddings = tf.sparse_tensor_dense_matmul(self.sub_mat['sub_mat_t'], target_embeddings)
+            target_embeddings = tf.sparse.sparse_dense_matmul(self.sub_mat['sub_mat_t'], target_embeddings)
             #norm_embeddings = tf.math.l2_normalize(target_embeddings, axis=1)
             all_target_embeddings += [target_embeddings]
         # averaging the view-specific embeddings
-        online_embeddings = tf.reduce_mean(all_online_embeddings, axis=0)
-        self.on_user_embeddings, self.on_item_embeddings = tf.split(online_embeddings, [self.num_users, self.num_items], 0)
-        #linear layer
+        online_embeddings = tf.reduce_mean(input_tensor=all_online_embeddings, axis=0)
+        self.on_user_embeddings, self.on_item_embeddings = tf.split(online_embeddings, [self.num_users, self.num_items],
+                                                                    0)
+
+        # linear layer
         def linear(em):
-            return tf.nn.tanh(tf.matmul(em,self.online_mat)+self.online_bias)
+            return tf.nn.tanh(tf.matmul(em, self.online_mat) + self.online_bias)
+
         q_online_embeddings = linear(online_embeddings)
-        self.q_user_embeddings, self.q_item_embeddings = tf.split(q_online_embeddings, [self.num_users, self.num_items], 0)
-        target_embeddings = tf.reduce_mean(all_target_embeddings, axis=0)
+        self.q_user_embeddings, self.q_item_embeddings = tf.split(q_online_embeddings, [self.num_users, self.num_items],
+                                                                  0)
+        target_embeddings = tf.reduce_mean(input_tensor=all_target_embeddings, axis=0)
         tar_user_embeddings, tar_item_embeddings = tf.split(target_embeddings, [self.num_users, self.num_items], 0)
         tar_user_embeddings = tf.stop_gradient(tar_user_embeddings)
         tar_item_embeddings = tf.stop_gradient(tar_item_embeddings)
         # embedding look-up
-        self.q_u_embedding = tf.nn.embedding_lookup(self.q_user_embeddings, self.u_idx)
-        self.q_i_embedding = tf.nn.embedding_lookup(self.q_item_embeddings, self.v_idx)
-        self.u_tar_embedding = tf.nn.embedding_lookup(tar_user_embeddings, self.u_idx)
-        self.i_tar_embedding = tf.nn.embedding_lookup(tar_item_embeddings, self.v_idx)
-        #target_update
-        momentum_u = self.target_user_embeddings*self.tau + self.online_user_embeddings*(1 - self.tau)
-        momentum_i = self.target_item_embeddings*self.tau + self.online_item_embeddings*(1 - self.tau)
+        self.q_u_embedding = tf.nn.embedding_lookup(params=self.q_user_embeddings, ids=self.u_idx)
+        self.q_i_embedding = tf.nn.embedding_lookup(params=self.q_item_embeddings, ids=self.v_idx)
+        self.u_tar_embedding = tf.nn.embedding_lookup(params=tar_user_embeddings, ids=self.u_idx)
+        self.i_tar_embedding = tf.nn.embedding_lookup(params=tar_item_embeddings, ids=self.v_idx)
+        # target_update
+        momentum_u = self.target_user_embeddings * self.tau + self.online_user_embeddings * (1 - self.tau)
+        momentum_i = self.target_item_embeddings * self.tau + self.online_item_embeddings * (1 - self.tau)
         self.tar_user_update = self.target_user_embeddings.assign(momentum_u)
         self.tar_item_update = self.target_item_embeddings.assign(momentum_i)
-        #test
-        self.pred = tf.reduce_sum(tf.multiply(self.q_u_embedding,self.on_item_embeddings),1)\
-                    +tf.reduce_sum(tf.multiply(tf.nn.embedding_lookup(self.on_user_embeddings,self.u_idx),self.q_item_embeddings),1)
+        # test
+        self.pred = tf.reduce_sum(input_tensor=tf.multiply(self.q_u_embedding, self.on_item_embeddings), axis=1) \
+                    + tf.reduce_sum(
+            input_tensor=tf.multiply(tf.nn.embedding_lookup(params=self.on_user_embeddings, ids=self.u_idx),
+                                     self.q_item_embeddings), axis=1)
     def buildModel(self):
         # computing loss
-        loss = 1-tf.reduce_sum(tf.multiply(tf.math.l2_normalize(self.q_u_embedding,axis=1),tf.math.l2_normalize(self.i_tar_embedding,axis=1)),1)
-        loss +=1-tf.reduce_sum(tf.multiply(tf.math.l2_normalize(self.q_i_embedding,axis=1),tf.math.l2_normalize(self.u_tar_embedding,axis=1)),1)
-        loss = tf.reduce_sum(loss/2)#+self.regU * (tf.nn.l2_loss(self.user_embeddings) + tf.nn.l2_loss(self.item_embeddings)
-                                                 #+tf.nn.l2_loss(self.online_mat)+tf.nn.l2_loss(self.online_bias))
+        loss = 1 - tf.reduce_sum(input_tensor=tf.multiply(tf.math.l2_normalize(self.q_u_embedding, axis=1),
+                                                          tf.math.l2_normalize(self.i_tar_embedding, axis=1)), axis=1)
+        loss += 1 - tf.reduce_sum(input_tensor=tf.multiply(tf.math.l2_normalize(self.q_i_embedding, axis=1),
+                                                           tf.math.l2_normalize(self.u_tar_embedding, axis=1)), axis=1)
+        loss = tf.reduce_sum(
+            input_tensor=loss / 2)  # +self.regU * (tf.nn.l2_loss(self.user_embeddings) + tf.nn.l2_loss(self.item_embeddings)
+        # +tf.nn.l2_loss(self.online_mat)+tf.nn.l2_loss(self.online_bias))
         # optimizer setting
-        learner = tf.train.AdamOptimizer(self.lRate)
+        learner = tf.compat.v1.train.AdamOptimizer(self.lRate)
         op = learner.minimize(loss)
-        init = tf.global_variables_initializer()
+        init = tf.compat.v1.global_variables_initializer()
         self.sess.run(init)
-        #training
+        # training
         for epoch in range(self.maxEpoch):
             sub_mat = {}
             sub_mat['adj_indices_sub_o'], sub_mat['adj_values_sub_o'], sub_mat[

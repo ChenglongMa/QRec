@@ -51,9 +51,9 @@ class DHCF(DeepRecommender):
 
         print('Runing on GPU...')
         #Build network
-        self.isTraining = tf.placeholder(tf.int32)
+        self.isTraining = tf.compat.v1.placeholder(tf.int32)
         self.isTraining = tf.cast(self.isTraining, tf.bool)
-        initializer = tf.contrib.layers.xavier_initializer()
+        initializer = tf.compat.v1.keras.initializers.VarianceScaling(scale=1.0, mode="fan_avg", distribution="uniform")
         self.n_layer = 2
         self.weights={}
         for i in range(self.n_layer):
@@ -72,19 +72,21 @@ class DHCF(DeepRecommender):
             return tf.nn.dropout(embedding, rate=0.1)
 
         for i in range(self.n_layer):
-            new_user_embeddings = tf.sparse_tensor_dense_matmul(H_u,self.user_embeddings)
-            new_item_embeddings = tf.sparse_tensor_dense_matmul(H_i,self.item_embeddings)
+            new_user_embeddings = tf.sparse.sparse_dense_matmul(H_u, self.user_embeddings)
+            new_item_embeddings = tf.sparse.sparse_dense_matmul(H_i, self.item_embeddings)
 
-            user_embeddings = tf.nn.leaky_relu(tf.matmul(new_user_embeddings,self.weights['layer_%d' %(i+1)])+ user_embeddings)
-            item_embeddings = tf.nn.leaky_relu(tf.matmul(new_item_embeddings,self.weights['layer_%d' %(i+1)])+ item_embeddings)
+            user_embeddings = tf.nn.leaky_relu(
+                tf.matmul(new_user_embeddings, self.weights['layer_%d' % (i + 1)]) + user_embeddings)
+            item_embeddings = tf.nn.leaky_relu(
+                tf.matmul(new_item_embeddings, self.weights['layer_%d' % (i + 1)]) + item_embeddings)
 
-            user_embeddings = tf.cond(self.isTraining, lambda: dropout(user_embeddings),
-                                      lambda: without_dropout(user_embeddings))
-            item_embeddings = tf.cond(self.isTraining, lambda: dropout(item_embeddings),
-                                      lambda: without_dropout(item_embeddings))
+            user_embeddings = tf.cond(pred=self.isTraining, true_fn=lambda: dropout(user_embeddings),
+                                      false_fn=lambda: without_dropout(user_embeddings))
+            item_embeddings = tf.cond(pred=self.isTraining, true_fn=lambda: dropout(item_embeddings),
+                                      false_fn=lambda: without_dropout(item_embeddings))
 
-            user_embeddings = tf.math.l2_normalize(user_embeddings,axis=1)
-            item_embeddings = tf.math.l2_normalize(item_embeddings,axis=1)
+            user_embeddings = tf.math.l2_normalize(user_embeddings, axis=1)
+            item_embeddings = tf.math.l2_normalize(item_embeddings, axis=1)
 
             all_item_embeddings.append(item_embeddings)
             all_user_embeddings.append(user_embeddings)
@@ -92,32 +94,33 @@ class DHCF(DeepRecommender):
         # user_embeddings = tf.reduce_sum(all_user_embeddings,axis=0)/(1+self.n_layer)
         # item_embeddings = tf.reduce_sum(all_item_embeddings, axis=0) / (1 + self.n_layer)
         #
-        user_embeddings = tf.concat(all_user_embeddings,axis=1)
+        user_embeddings = tf.concat(all_user_embeddings, axis=1)
         item_embeddings = tf.concat(all_item_embeddings, axis=1)
 
-        self.neg_idx = tf.placeholder(tf.int32, name="neg_holder")
-        self.neg_item_embedding = tf.nn.embedding_lookup(item_embeddings, self.neg_idx)
-        self.u_embedding = tf.nn.embedding_lookup(user_embeddings, self.u_idx)
-        self.v_embedding = tf.nn.embedding_lookup(item_embeddings, self.v_idx)
-        self.test = tf.reduce_sum(tf.multiply(self.u_embedding,item_embeddings),1)
+        self.neg_idx = tf.compat.v1.placeholder(tf.int32, name="neg_holder")
+        self.neg_item_embedding = tf.nn.embedding_lookup(params=item_embeddings, ids=self.neg_idx)
+        self.u_embedding = tf.nn.embedding_lookup(params=user_embeddings, ids=self.u_idx)
+        self.v_embedding = tf.nn.embedding_lookup(params=item_embeddings, ids=self.v_idx)
+        self.test = tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, item_embeddings), axis=1)
 
     def buildModel(self):
-        y = tf.reduce_sum(tf.multiply(self.u_embedding, self.v_embedding), 1) \
-            - tf.reduce_sum(tf.multiply(self.u_embedding, self.neg_item_embedding), 1)
+        y = tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.v_embedding), axis=1) \
+            - tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.neg_item_embedding), axis=1)
         reg_loss = self.regU * (tf.nn.l2_loss(self.u_embedding) + tf.nn.l2_loss(self.v_embedding) +
-                                                                    tf.nn.l2_loss(self.neg_item_embedding))
+                                tf.nn.l2_loss(self.neg_item_embedding))
         for i in range(self.n_layer):
-            reg_loss+= self.regU*tf.nn.l2_loss(self.weights['layer_%d' %(i+1)])
-        loss = -tf.reduce_sum(tf.log(tf.sigmoid(y))) + reg_loss
-        opt = tf.train.AdamOptimizer(self.lRate)
+            reg_loss += self.regU * tf.nn.l2_loss(self.weights['layer_%d' % (i + 1)])
+        loss = -tf.reduce_sum(input_tensor=tf.math.log(tf.sigmoid(y))) + reg_loss
+        opt = tf.compat.v1.train.AdamOptimizer(self.lRate)
         train = opt.minimize(loss)
-        init = tf.global_variables_initializer()
+        init = tf.compat.v1.global_variables_initializer()
         self.sess.run(init)
         for epoch in range(self.maxEpoch):
             for n, batch in enumerate(self.next_batch_pairwise()):
                 user_idx, i_idx, j_idx = batch
                 _, l = self.sess.run([train, loss],
-                                feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx,self.isTraining:1})
+                                     feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx,
+                                                self.isTraining: 1})
                 print('training:', epoch + 1, 'batch', n, 'loss:', l)
 
     def predictForRanking(self, u):

@@ -66,9 +66,9 @@ class SEPT(SocialRecommender, DeepRecommender):
 
     def _create_variable(self):
         self.sub_mat = {}
-        self.sub_mat['adj_values_sub'] = tf.placeholder(tf.float32)
-        self.sub_mat['adj_indices_sub'] = tf.placeholder(tf.int64)
-        self.sub_mat['adj_shape_sub'] = tf.placeholder(tf.int64)
+        self.sub_mat['adj_values_sub'] = tf.compat.v1.placeholder(tf.float32)
+        self.sub_mat['adj_indices_sub'] = tf.compat.v1.placeholder(tf.int64)
+        self.sub_mat['adj_shape_sub'] = tf.compat.v1.placeholder(tf.int64)
         self.sub_mat['sub_mat'] = tf.SparseTensor(
             self.sub_mat['adj_indices_sub'],
             self.sub_mat['adj_values_sub'],
@@ -121,15 +121,17 @@ class SEPT(SocialRecommender, DeepRecommender):
 
     def initModel(self):
         super(SEPT, self).initModel()
-        self.neg_idx = tf.placeholder(tf.int32, name="neg_holder")
+        self.neg_idx = tf.compat.v1.placeholder(tf.int32, name="neg_holder")
         self._create_variable()
         self.bs_matrix = self.get_birectional_social_matrix()
         self.rating_mat = self.buildSparseRatingMatrix()
         social_mat, sharing_mat = self.get_social_related_views(self.bs_matrix, self.rating_mat)
         social_mat = self._convert_sp_mat_to_sp_tensor(social_mat)
         sharing_mat = self._convert_sp_mat_to_sp_tensor(sharing_mat)
-        self.user_embeddings = tf.Variable(tf.truncated_normal(shape=[self.num_users, self.emb_size], stddev=0.005), name='U') / 2
-        self.item_embeddings = tf.Variable(tf.truncated_normal(shape=[self.num_items, self.emb_size], stddev=0.005), name='V') / 2
+        self.user_embeddings = tf.Variable(
+            tf.random.truncated_normal(shape=[self.num_users, self.emb_size], stddev=0.005), name='U') / 2
+        self.item_embeddings = tf.Variable(
+            tf.random.truncated_normal(shape=[self.num_items, self.emb_size], stddev=0.005), name='V') / 2
         # initialize adjacency matrices
         ui_mat = self.get_adj_mat()
         ui_mat = self._convert_sp_mat_to_sp_tensor(ui_mat)
@@ -145,19 +147,19 @@ class SEPT(SocialRecommender, DeepRecommender):
         #multi-view convolution: LightGCN structure
         for k in range(self.n_layers):
             # friend view
-            friend_view_embeddings = tf.sparse_tensor_dense_matmul(social_mat,friend_view_embeddings)
+            friend_view_embeddings = tf.sparse.sparse_dense_matmul(social_mat, friend_view_embeddings)
             norm_embeddings = tf.math.l2_normalize(friend_view_embeddings, axis=1)
             all_social_embeddings += [norm_embeddings]
             # sharing view
-            sharing_view_embeddings = tf.sparse_tensor_dense_matmul(sharing_mat,sharing_view_embeddings)
+            sharing_view_embeddings = tf.sparse.sparse_dense_matmul(sharing_mat, sharing_view_embeddings)
             norm_embeddings = tf.math.l2_normalize(sharing_view_embeddings, axis=1)
             all_sharing_embeddings += [norm_embeddings]
             # preference view
-            ego_embeddings = tf.sparse_tensor_dense_matmul(ui_mat, ego_embeddings)
+            ego_embeddings = tf.sparse.sparse_dense_matmul(ui_mat, ego_embeddings)
             norm_embeddings = tf.math.l2_normalize(ego_embeddings, axis=1)
             all_embeddings += [norm_embeddings]
             # unlabeled sample view
-            aug_embeddings = tf.sparse_tensor_dense_matmul(self.sub_mat['sub_mat'], aug_embeddings)
+            aug_embeddings = tf.sparse.sparse_dense_matmul(self.sub_mat['sub_mat'], aug_embeddings)
             norm_embeddings = tf.math.l2_normalize(aug_embeddings, axis=1)
             all_aug_embeddings += [norm_embeddings]
 
@@ -206,21 +208,23 @@ class SEPT(SocialRecommender, DeepRecommender):
         #     all_aug_embeddings += [norm_embeddings]
 
         # averaging the view-specific embeddings
-        self.friend_view_embeddings = tf.reduce_sum(all_social_embeddings, axis=0)
-        self.sharing_view_embeddings = tf.reduce_sum(all_sharing_embeddings, axis=0)
-        all_embeddings = tf.reduce_sum(all_embeddings, axis=0)
-        self.rec_user_embeddings, self.rec_item_embeddings = tf.split(all_embeddings, [self.num_users, self.num_items], 0)
-        aug_embeddings = tf.reduce_sum(all_aug_embeddings, axis=0)
-        self.aug_user_embeddings, self.aug_item_embeddings = tf.split(aug_embeddings, [self.num_users, self.num_items], 0)
+        self.friend_view_embeddings = tf.reduce_sum(input_tensor=all_social_embeddings, axis=0)
+        self.sharing_view_embeddings = tf.reduce_sum(input_tensor=all_sharing_embeddings, axis=0)
+        all_embeddings = tf.reduce_sum(input_tensor=all_embeddings, axis=0)
+        self.rec_user_embeddings, self.rec_item_embeddings = tf.split(all_embeddings, [self.num_users, self.num_items],
+                                                                      0)
+        aug_embeddings = tf.reduce_sum(input_tensor=all_aug_embeddings, axis=0)
+        self.aug_user_embeddings, self.aug_item_embeddings = tf.split(aug_embeddings, [self.num_users, self.num_items],
+                                                                      0)
         # embedding look-up
-        self.batch_user_emb = tf.nn.embedding_lookup(self.rec_user_embeddings, self.u_idx)
-        self.batch_pos_item_emb = tf.nn.embedding_lookup(self.rec_item_embeddings, self.v_idx)
-        self.batch_neg_item_emb = tf.nn.embedding_lookup(self.rec_item_embeddings, self.neg_idx)
+        self.batch_user_emb = tf.nn.embedding_lookup(params=self.rec_user_embeddings, ids=self.u_idx)
+        self.batch_pos_item_emb = tf.nn.embedding_lookup(params=self.rec_item_embeddings, ids=self.v_idx)
+        self.batch_neg_item_emb = tf.nn.embedding_lookup(params=self.rec_item_embeddings, ids=self.neg_idx)
 
     def label_prediction(self, emb):
-        emb = tf.nn.embedding_lookup(emb, tf.unique(self.u_idx)[0])
+        emb = tf.nn.embedding_lookup(params=emb, ids=tf.unique(self.u_idx)[0])
         emb = tf.nn.l2_normalize(emb, axis=1)
-        aug_emb = tf.nn.embedding_lookup(self.aug_user_embeddings, tf.unique(self.u_idx)[0])
+        aug_emb = tf.nn.embedding_lookup(params=self.aug_user_embeddings, ids=tf.unique(self.u_idx)[0])
         aug_emb = tf.nn.l2_normalize(aug_emb, axis=1)
         prob = tf.matmul(emb, aug_emb, transpose_b=True)
         # avoid self-sampling
@@ -239,27 +243,28 @@ class SEPT(SocialRecommender, DeepRecommender):
 
     def neighbor_discrimination(self, positive, emb):
         def score(x1, x2):
-            return tf.reduce_sum(tf.multiply(x1, x2), axis=2)
-        emb = tf.nn.embedding_lookup(emb, tf.unique(self.u_idx)[0])
+            return tf.reduce_sum(input_tensor=tf.multiply(x1, x2), axis=2)
+
+        emb = tf.nn.embedding_lookup(params=emb, ids=tf.unique(self.u_idx)[0])
         emb = tf.nn.l2_normalize(emb, axis=1)
-        aug_emb = tf.nn.embedding_lookup(self.aug_user_embeddings, tf.unique(self.u_idx)[0])
+        aug_emb = tf.nn.embedding_lookup(params=self.aug_user_embeddings, ids=tf.unique(self.u_idx)[0])
         aug_emb = tf.nn.l2_normalize(aug_emb, axis=1)
-        pos_emb = tf.nn.embedding_lookup(aug_emb, positive)
+        pos_emb = tf.nn.embedding_lookup(params=aug_emb, ids=positive)
         emb2 = tf.reshape(emb, [-1, 1, self.emb_size])
         emb2 = tf.tile(emb2, [1, self.instance_cnt, 1])
         pos = score(emb2, pos_emb)
         ttl_score = tf.matmul(emb, aug_emb, transpose_a=False, transpose_b=True)
-        pos_score = tf.reduce_sum(tf.exp(pos / 0.1), axis=1)
-        ttl_score = tf.reduce_sum(tf.exp(ttl_score / 0.1), axis=1)
-        ssl_loss = -tf.reduce_sum(tf.log(pos_score / ttl_score))
+        pos_score = tf.reduce_sum(input_tensor=tf.exp(pos / 0.1), axis=1)
+        ttl_score = tf.reduce_sum(input_tensor=tf.exp(ttl_score / 0.1), axis=1)
+        ssl_loss = -tf.reduce_sum(input_tensor=tf.math.log(pos_score / ttl_score))
         return ssl_loss
 
     def buildModel(self):
         # training the recommendation model
-        y = tf.reduce_sum(tf.multiply(self.batch_user_emb, self.batch_pos_item_emb), 1) \
-            - tf.reduce_sum(tf.multiply(self.batch_user_emb, self.batch_neg_item_emb), 1)
-        rec_loss = -tf.reduce_sum(tf.log(tf.sigmoid(y))) + self.regU * (
-                    tf.nn.l2_loss(self.user_embeddings) + tf.nn.l2_loss(self.item_embeddings))
+        y = tf.reduce_sum(input_tensor=tf.multiply(self.batch_user_emb, self.batch_pos_item_emb), axis=1) \
+            - tf.reduce_sum(input_tensor=tf.multiply(self.batch_user_emb, self.batch_neg_item_emb), axis=1)
+        rec_loss = -tf.reduce_sum(input_tensor=tf.math.log(tf.sigmoid(y))) + self.regU * (
+                tf.nn.l2_loss(self.user_embeddings) + tf.nn.l2_loss(self.item_embeddings))
         # self-supervision prediction
         social_prediction = self.label_prediction(self.friend_view_embeddings)
         sharing_prediction = self.label_prediction(self.sharing_view_embeddings)
@@ -274,12 +279,12 @@ class SEPT(SocialRecommender, DeepRecommender):
         self.neighbor_dis_loss += self.neighbor_discrimination(self.r_pos, self.rec_user_embeddings)
         # optimizer setting
         loss = rec_loss
-        loss = loss + self.ss_rate*self.neighbor_dis_loss
-        v1_opt = tf.train.AdamOptimizer(self.lRate)
+        loss = loss + self.ss_rate * self.neighbor_dis_loss
+        v1_opt = tf.compat.v1.train.AdamOptimizer(self.lRate)
         v1_op = v1_opt.minimize(rec_loss)
-        v2_opt = tf.train.AdamOptimizer(self.lRate)
+        v2_opt = tf.compat.v1.train.AdamOptimizer(self.lRate)
         v2_op = v2_opt.minimize(loss)
-        init = tf.global_variables_initializer()
+        init = tf.compat.v1.global_variables_initializer()
         self.sess.run(init)
         for epoch in range(self.maxEpoch):
             #joint learning

@@ -11,9 +11,9 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 def gumbel_softmax(logits, temperature=0.2):
     eps = 1e-10
-    u = tf.random_uniform(tf.shape(logits), minval=0, maxval=1)
-    gumbel_noise = -tf.log(-tf.log(u + eps) + eps)
-    y = tf.log(logits + eps) + gumbel_noise
+    u = tf.random.uniform(tf.shape(input=logits), minval=0, maxval=1)
+    gumbel_noise = -tf.math.log(-tf.math.log(u + eps) + eps)
+    y = tf.math.log(logits + eps) + gumbel_noise
     return tf.nn.softmax(y / temperature)
 
 class ESRF(SocialRecommender,DeepRecommender):
@@ -80,32 +80,34 @@ class ESRF(SocialRecommender,DeepRecommender):
         A = A.transpose()
         return A
 
-    def buildMotifGCN(self,adjacency):
-        self.relation_embeddings = tf.Variable(tf.truncated_normal(shape=[self.num_users, self.emb_size], stddev=0.005), name='U_r')
-        projection_head = tf.Variable(tf.truncated_normal(shape=[self.emb_size, self.emb_size], stddev=0.005), name='p_h')
-        self.userSegment = tf.placeholder(tf.int32)
+    def buildMotifGCN(self, adjacency):
+        self.relation_embeddings = tf.Variable(
+            tf.random.truncated_normal(shape=[self.num_users, self.emb_size], stddev=0.005), name='U_r')
+        projection_head = tf.Variable(tf.random.truncated_normal(shape=[self.emb_size, self.emb_size], stddev=0.005),
+                                      name='p_h')
+        self.userSegment = tf.compat.v1.placeholder(tf.int32)
 
-        #convert sparse matrix to sparse tensor
+        # convert sparse matrix to sparse tensor
         adjacency = adjacency.tocoo()
         indices = np.mat([adjacency.row, adjacency.col]).transpose()
         self.A = tf.SparseTensor(indices, adjacency.data.astype(np.float32), adjacency.shape)
         self.adjacency = adjacency.tocsr()
         self.g_weights = dict()
-        initializer = tf.contrib.layers.xavier_initializer()
+        initializer = tf.compat.v1.keras.initializers.VarianceScaling(scale=1.0, mode="fan_avg", distribution="uniform")
         all_embeddings = [self.relation_embeddings]
         user_embeddings = self.relation_embeddings
         for d in range(self.n_layers_G):
-            user_embeddings = tf.sparse_tensor_dense_matmul(self.A, user_embeddings)
+            user_embeddings = tf.sparse.sparse_dense_matmul(self.A, user_embeddings)
             norm_embeddings = tf.math.l2_normalize(user_embeddings, axis=1)
             all_embeddings += [norm_embeddings]
-        user_embeddings = tf.nn.sigmoid(tf.matmul(tf.reduce_sum(all_embeddings, 0), projection_head))
+        user_embeddings = tf.nn.sigmoid(tf.matmul(tf.reduce_sum(input_tensor=all_embeddings, axis=0), projection_head))
         # construct concrete selector layer
         self.g_weights['c_selector'] = tf.Variable(initializer([self.K,self.num_users]), name='c_selector')
         #to avoid oom, each time we just generate alternative negibhborhood for 100 users
         user_features = tf.matmul(user_embeddings[self.userSegment:self.userSegment+100],user_embeddings,transpose_b=True)
         def getAlternativeNeighborhood(embedding):
             alphaEmbeddings = tf.multiply(embedding, self.g_weights['c_selector'])
-            one_hot_vector = tf.reduce_sum(self.sampling(alphaEmbeddings), 0)
+            one_hot_vector = tf.reduce_sum(input_tensor=self.sampling(alphaEmbeddings), axis=0)
             return one_hot_vector
         self.alternativeNeighborhood = tf.vectorized_map(fn=lambda em:getAlternativeNeighborhood(em),elems=user_features)
         paddings = tf.zeros(shape=(self.num_users,self.num_users))
@@ -139,11 +141,11 @@ class ESRF(SocialRecommender,DeepRecommender):
         # self.r_train = r_opt.minimize(self.r_loss)
 
     def buildRecGCN(self):
-        self.isSocial = tf.placeholder(tf.int32)
+        self.isSocial = tf.compat.v1.placeholder(tf.int32)
         self.isSocial = tf.cast(self.isSocial, tf.bool)
-        self.isAttentive = tf.placeholder(tf.int32)
+        self.isAttentive = tf.compat.v1.placeholder(tf.int32)
         self.isAttentive = tf.cast(self.isAttentive, tf.bool)
-        self.sampledItems = tf.placeholder(tf.int32)
+        self.sampledItems = tf.compat.v1.placeholder(tf.int32)
         self.d_weights = dict()
         ego_embeddings = tf.concat([self.user_embeddings, self.item_embeddings], axis=0)
 
@@ -157,7 +159,7 @@ class ESRF(SocialRecommender,DeepRecommender):
         norm_adj = tf.SparseTensor(indices=indices, values=values,
                                    dense_shape=[self.num_users + self.num_items, self.num_users + self.num_items])
 
-        initializer = tf.contrib.layers.xavier_initializer()
+        initializer = tf.compat.v1.keras.initializers.VarianceScaling(scale=1.0, mode="fan_avg", distribution="uniform")
 
         all_embeddings = [ego_embeddings]
 
@@ -171,7 +173,7 @@ class ESRF(SocialRecommender,DeepRecommender):
 
         vals, indexes = tf.nn.top_k(self.alternativeNeighborhood, self.K)
         for k in range(self.n_layers_D):
-            new_embeddings = tf.sparse_tensor_dense_matmul(norm_adj, ego_embeddings)
+            new_embeddings = tf.sparse.sparse_dense_matmul(norm_adj, ego_embeddings)
 
             #social attention (applying attention may be a little time-consuming)
             # selectedItemEmbeddings = tf.gather(ego_embeddings[self.num_users:],self.sampledItems)
@@ -203,45 +205,49 @@ class ESRF(SocialRecommender,DeepRecommender):
                 return new_embeddings
 
             def with_social(embeddings):
-                socialEmbeddings = tf.cond(self.isAttentive, lambda: with_attention(), lambda: without_attention())
-                return tf.concat([(embeddings[:self.num_users]+socialEmbeddings),embeddings[self.num_users:]],0)
+                socialEmbeddings = tf.cond(pred=self.isAttentive, true_fn=lambda: with_attention(),
+                                           false_fn=lambda: without_attention())
+                return tf.concat([(embeddings[:self.num_users] + socialEmbeddings), embeddings[self.num_users:]], 0)
 
-            ego_embeddings = tf.cond(self.isSocial, lambda: with_social(new_embeddings), lambda: without_social())
+            ego_embeddings = tf.cond(pred=self.isSocial, true_fn=lambda: with_social(new_embeddings),
+                                     false_fn=lambda: without_social())
             # normalize the distribution of embeddings.
             norm_embeddings = tf.math.l2_normalize(ego_embeddings, axis=1)
             all_embeddings += [norm_embeddings]
 
-        all_embeddings = tf.reduce_sum(all_embeddings, 0)
-        self.multi_user_embeddings, self.multi_item_embeddings = tf.split(all_embeddings,[self.num_users, self.num_items], 0)
-        self.neg_idx = tf.placeholder(tf.int32, name="neg_holder")
-        self.neg_item_embedding = tf.nn.embedding_lookup(self.multi_item_embeddings, self.neg_idx)
-        self.u_embedding = tf.nn.embedding_lookup(self.multi_user_embeddings, self.u_idx)
-        self.v_embedding = tf.nn.embedding_lookup(self.multi_item_embeddings, self.v_idx)
+        all_embeddings = tf.reduce_sum(input_tensor=all_embeddings, axis=0)
+        self.multi_user_embeddings, self.multi_item_embeddings = tf.split(all_embeddings,
+                                                                          [self.num_users, self.num_items], 0)
+        self.neg_idx = tf.compat.v1.placeholder(tf.int32, name="neg_holder")
+        self.neg_item_embedding = tf.nn.embedding_lookup(params=self.multi_item_embeddings, ids=self.neg_idx)
+        self.u_embedding = tf.nn.embedding_lookup(params=self.multi_user_embeddings, ids=self.u_idx)
+        self.v_embedding = tf.nn.embedding_lookup(params=self.multi_item_embeddings, ids=self.v_idx)
 
     def buildGenerator(self):
-        y_ui = tf.reduce_sum(tf.multiply(self.u_embedding, self.v_embedding), 1)
+        y_ui = tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.v_embedding), axis=1)
         currentNeighbors = tf.gather(self.alternativeNeighborhood, self.u_idx)
-        friendEmbeddings = tf.matmul(currentNeighbors, self.multi_user_embeddings)/self.K
-        y_vi = tf.reduce_sum(tf.multiply(friendEmbeddings, self.v_embedding), 1)
-        self.g_adv_loss = -tf.reduce_sum(tf.log(tf.sigmoid(y_vi-y_ui)))
-        self.g_loss = self.beta*self.g_adv_loss#+self.r_loss
-        opt = tf.train.AdamOptimizer(self.lRate*5)
-        self.g_train = opt.minimize(self.g_loss, var_list=[self.g_weights,self.relation_embeddings])
+        friendEmbeddings = tf.matmul(currentNeighbors, self.multi_user_embeddings) / self.K
+        y_vi = tf.reduce_sum(input_tensor=tf.multiply(friendEmbeddings, self.v_embedding), axis=1)
+        self.g_adv_loss = -tf.reduce_sum(input_tensor=tf.math.log(tf.sigmoid(y_vi - y_ui)))
+        self.g_loss = self.beta * self.g_adv_loss  # +self.r_loss
+        opt = tf.compat.v1.train.AdamOptimizer(self.lRate * 5)
+        self.g_train = opt.minimize(self.g_loss, var_list=[self.g_weights, self.relation_embeddings])
 
     def buildDiscriminator(self):
-        y_ui = tf.reduce_sum(tf.multiply(self.u_embedding, self.v_embedding), 1)
-        y_uj = tf.reduce_sum(tf.multiply(self.u_embedding, self.neg_item_embedding), 1)
-        currentNeighbors = tf.gather(self.alternativeNeighborhood,self.u_idx)
+        y_ui = tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.v_embedding), axis=1)
+        y_uj = tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.neg_item_embedding), axis=1)
+        currentNeighbors = tf.gather(self.alternativeNeighborhood, self.u_idx)
         friendEmbeddings = tf.matmul(currentNeighbors, self.multi_user_embeddings) / self.K
-        y_vi = tf.reduce_sum(tf.multiply(friendEmbeddings,self.v_embedding),1)
-        #s_Regularization = 0.03*tf.nn.l2_loss(self.u_embedding - friendEmbeddings)
-        pairwise_loss = -tf.reduce_sum(tf.log(tf.sigmoid(y_ui-y_uj)))
-        reg_loss = self.regU * (tf.nn.l2_loss(self.u_embedding) + tf.nn.l2_loss(self.v_embedding) + tf.nn.l2_loss(self.neg_item_embedding))
-        adversarial_loss = -tf.reduce_sum(tf.log(tf.sigmoid(y_ui-y_vi)))
+        y_vi = tf.reduce_sum(input_tensor=tf.multiply(friendEmbeddings, self.v_embedding), axis=1)
+        # s_Regularization = 0.03*tf.nn.l2_loss(self.u_embedding - friendEmbeddings)
+        pairwise_loss = -tf.reduce_sum(input_tensor=tf.math.log(tf.sigmoid(y_ui - y_uj)))
+        reg_loss = self.regU * (tf.nn.l2_loss(self.u_embedding) + tf.nn.l2_loss(self.v_embedding) + tf.nn.l2_loss(
+            self.neg_item_embedding))
+        adversarial_loss = -tf.reduce_sum(input_tensor=tf.math.log(tf.sigmoid(y_ui - y_vi)))
         self.d_loss = pairwise_loss + reg_loss
-        self.d_advloss = pairwise_loss + reg_loss + self.beta*adversarial_loss#+s_Regularization
-        opt = tf.train.AdamOptimizer(self.lRate)
-        self.d_train = opt.minimize(self.d_loss,var_list = [self.user_embeddings,self.item_embeddings])
+        self.d_advloss = pairwise_loss + reg_loss + self.beta * adversarial_loss  # +s_Regularization
+        opt = tf.compat.v1.train.AdamOptimizer(self.lRate)
+        self.d_train = opt.minimize(self.d_loss, var_list=[self.user_embeddings, self.item_embeddings])
         self.d_adv_train = opt.minimize(self.d_advloss, var_list=[self.user_embeddings, self.item_embeddings,self.d_weights])
         self.minimax = tf.group(self.d_adv_train, self.g_train)
 
@@ -272,7 +278,7 @@ class ESRF(SocialRecommender,DeepRecommender):
         self.buildRecGCN()
         self.buildGenerator()
         self.buildDiscriminator()
-        init = tf.global_variables_initializer()
+        init = tf.compat.v1.global_variables_initializer()
         self.sess.run(init)
 
         self.attentiveTraining = 0

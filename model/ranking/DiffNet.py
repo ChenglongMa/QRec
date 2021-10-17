@@ -49,33 +49,34 @@ class DiffNet(SocialRecommender,DeepRecommender):
 
     def buildModel(self):
         self.weights = {}
-        initializer = tf.contrib.layers.xavier_initializer()
+        initializer = tf.compat.v1.keras.initializers.VarianceScaling(scale=1.0, mode="fan_avg", distribution="uniform")
         for k in range(self.n_layers):
             self.weights['weights%d' % k] = tf.Variable(
                 initializer([2 * self.emb_size, self.emb_size]), name='weights%d' % k)
 
         user_embeddings = self.user_embeddings
         for k in range(self.n_layers):
-            new_user_embeddings = tf.sparse_tensor_dense_matmul(self.S,user_embeddings)
-            user_embeddings = tf.matmul(tf.concat([new_user_embeddings,user_embeddings],1),self.weights['weights%d' % k])
+            new_user_embeddings = tf.sparse.sparse_dense_matmul(self.S, user_embeddings)
+            user_embeddings = tf.matmul(tf.concat([new_user_embeddings, user_embeddings], 1),
+                                        self.weights['weights%d' % k])
             user_embeddings = tf.nn.relu(user_embeddings)
-            #user_embeddings = tf.math.l2_normalize(user_embeddings,axis=1)
+            # user_embeddings = tf.math.l2_normalize(user_embeddings,axis=1)
 
-        final_user_embeddings = user_embeddings+tf.sparse_tensor_dense_matmul(self.A,self.item_embeddings)
-        self.neg_idx = tf.placeholder(tf.int32, name="neg_holder")
-        self.neg_item_embedding = tf.nn.embedding_lookup(self.item_embeddings, self.neg_idx)
-        self.u_embedding = tf.nn.embedding_lookup(final_user_embeddings, self.u_idx)
-        self.v_embedding = tf.nn.embedding_lookup(self.item_embeddings, self.v_idx)
-        self.test = tf.reduce_sum(tf.multiply(self.u_embedding, self.item_embeddings), 1)
+        final_user_embeddings = user_embeddings + tf.sparse.sparse_dense_matmul(self.A, self.item_embeddings)
+        self.neg_idx = tf.compat.v1.placeholder(tf.int32, name="neg_holder")
+        self.neg_item_embedding = tf.nn.embedding_lookup(params=self.item_embeddings, ids=self.neg_idx)
+        self.u_embedding = tf.nn.embedding_lookup(params=final_user_embeddings, ids=self.u_idx)
+        self.v_embedding = tf.nn.embedding_lookup(params=self.item_embeddings, ids=self.v_idx)
+        self.test = tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.item_embeddings), axis=1)
 
-        y = tf.reduce_sum(tf.multiply(self.u_embedding, self.v_embedding), 1) \
-            - tf.reduce_sum(tf.multiply(self.u_embedding, self.neg_item_embedding), 1)
-        loss = -tf.reduce_sum(tf.log(tf.sigmoid(y))) + self.regU * (
-                    tf.nn.l2_loss(self.u_embedding) + tf.nn.l2_loss(self.v_embedding) +
-                    tf.nn.l2_loss(self.neg_item_embedding))
-        opt = tf.train.AdamOptimizer(self.lRate)
+        y = tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.v_embedding), axis=1) \
+            - tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.neg_item_embedding), axis=1)
+        loss = -tf.reduce_sum(input_tensor=tf.math.log(tf.sigmoid(y))) + self.regU * (
+                tf.nn.l2_loss(self.u_embedding) + tf.nn.l2_loss(self.v_embedding) +
+                tf.nn.l2_loss(self.neg_item_embedding))
+        opt = tf.compat.v1.train.AdamOptimizer(self.lRate)
         train = opt.minimize(loss)
-        init = tf.global_variables_initializer()
+        init = tf.compat.v1.global_variables_initializer()
         self.sess.run(init)
         for epoch in range(self.maxEpoch):
             for n, batch in enumerate(self.next_batch_pairwise()):

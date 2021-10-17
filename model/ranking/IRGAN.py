@@ -14,30 +14,34 @@ class GEN():
         self.emb_dim = emb_dim
         self.lamda = lamda  # regularization parameters
         self.g_params = []
-        with tf.variable_scope('generator'):
+        with tf.compat.v1.variable_scope('generator'):
             self.user_embeddings = tf.Variable(
-                tf.random_uniform([self.userNum, self.emb_dim], minval=-0.05, maxval=0.05, dtype=tf.float32))
+                tf.random.uniform([self.userNum, self.emb_dim], minval=-0.05, maxval=0.05, dtype=tf.float32))
             self.item_embeddings = tf.Variable(
-                tf.random_uniform([self.itemNum, self.emb_dim], minval=-0.05, maxval=0.05, dtype=tf.float32))
+                tf.random.uniform([self.itemNum, self.emb_dim], minval=-0.05, maxval=0.05, dtype=tf.float32))
             self.item_bias = tf.Variable(tf.zeros([self.itemNum]))
             self.g_params = [self.user_embeddings, self.item_embeddings, self.item_bias]
 
-        self.u = tf.placeholder(tf.int32)
-        self.i = tf.placeholder(tf.int32)
-        self.label = tf.placeholder(tf.float32)
-        self.reward = tf.placeholder(tf.float32)
-        self.u_embedding = tf.nn.embedding_lookup(self.user_embeddings, self.u)
-        self.i_embedding = tf.nn.embedding_lookup(self.item_embeddings, self.i)
+        self.u = tf.compat.v1.placeholder(tf.int32)
+        self.i = tf.compat.v1.placeholder(tf.int32)
+        self.label = tf.compat.v1.placeholder(tf.float32)
+        self.reward = tf.compat.v1.placeholder(tf.float32)
+        self.u_embedding = tf.nn.embedding_lookup(params=self.user_embeddings, ids=self.u)
+        self.i_embedding = tf.nn.embedding_lookup(params=self.item_embeddings, ids=self.i)
         self.i_bias = tf.gather(self.item_bias, self.i)
         self.pre_train_loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=self.label,
-                            logits=tf.reduce_sum(tf.multiply(self.u_embedding,self.i_embedding),1))
+                                                                      logits=tf.reduce_sum(
+                                                                          input_tensor=tf.multiply(self.u_embedding,
+                                                                                                   self.i_embedding),
+                                                                          axis=1))
         self.pre_train_loss += self.lamda * (tf.nn.l2_loss(self.u_embedding) + tf.nn.l2_loss(self.i_embedding)
                                              + tf.nn.l2_loss(self.i_bias))
-        self.all_logits = tf.reduce_sum(tf.multiply(self.u_embedding, self.item_embeddings), 1) + self.item_bias
-        self.i_prob = tf.gather(tf.reshape(tf.nn.softmax(tf.reshape(self.all_logits, [1, -1])), [-1]),self.i)
-        self.gan_loss = -tf.reduce_mean(tf.log(self.i_prob) * self.reward) + self.lamda * (
-            tf.nn.l2_loss(self.u_embedding) + tf.nn.l2_loss(self.i_embedding) + tf.nn.l2_loss(self.i_bias))
-        g_opt = tf.train.AdamOptimizer(learning_rate)
+        self.all_logits = tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.item_embeddings),
+                                        axis=1) + self.item_bias
+        self.i_prob = tf.gather(tf.reshape(tf.nn.softmax(tf.reshape(self.all_logits, [1, -1])), [-1]), self.i)
+        self.gan_loss = -tf.reduce_mean(input_tensor=tf.math.log(self.i_prob) * self.reward) + self.lamda * (
+                tf.nn.l2_loss(self.u_embedding) + tf.nn.l2_loss(self.i_embedding) + tf.nn.l2_loss(self.i_bias))
+        g_opt = tf.compat.v1.train.AdamOptimizer(learning_rate)
         self.gan_updates = g_opt.minimize(self.gan_loss, var_list=self.g_params)
 
 class DIS():
@@ -47,32 +51,36 @@ class DIS():
         self.emb_dim = emb_dim
         self.lamda = lamda  # regularization parameters
         self.d_params = []
-        with tf.variable_scope('discriminator'):
+        with tf.compat.v1.variable_scope('discriminator'):
             self.user_embeddings = tf.Variable(
-                tf.random_uniform([self.userNum, self.emb_dim], minval=-0.05, maxval=0.05,dtype=tf.float32))
+                tf.random.uniform([self.userNum, self.emb_dim], minval=-0.05, maxval=0.05, dtype=tf.float32))
             self.item_embeddings = tf.Variable(
-                tf.random_uniform([self.itemNum, self.emb_dim], minval=-0.05, maxval=0.05,dtype=tf.float32))
+                tf.random.uniform([self.itemNum, self.emb_dim], minval=-0.05, maxval=0.05, dtype=tf.float32))
             self.item_bias = tf.Variable(tf.zeros([self.itemNum]))
         self.d_params = [self.user_embeddings, self.item_embeddings, self.item_bias]
 
         # placeholder definition
-        self.u = tf.placeholder(tf.int32)
-        self.i = tf.placeholder(tf.int32)
-        self.label = tf.placeholder(tf.float32)
-        self.u_embedding = tf.nn.embedding_lookup(self.user_embeddings, self.u)
-        self.i_embedding = tf.nn.embedding_lookup(self.item_embeddings, self.i)
+        self.u = tf.compat.v1.placeholder(tf.int32)
+        self.i = tf.compat.v1.placeholder(tf.int32)
+        self.label = tf.compat.v1.placeholder(tf.float32)
+        self.u_embedding = tf.nn.embedding_lookup(params=self.user_embeddings, ids=self.u)
+        self.i_embedding = tf.nn.embedding_lookup(params=self.item_embeddings, ids=self.i)
         self.i_bias = tf.gather(self.item_bias, self.i)
-        self.pre_logits = tf.reduce_sum(tf.multiply(self.u_embedding, self.i_embedding), 1) + self.i_bias
+        self.pre_logits = tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.i_embedding),
+                                        axis=1) + self.i_bias
         self.pre_loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=self.label, logits=self.pre_logits) \
                         + self.lamda * (tf.nn.l2_loss(self.u_embedding) + tf.nn.l2_loss(self.i_embedding)
                                         + tf.nn.l2_loss(self.i_bias))
 
-        d_opt = tf.train.AdamOptimizer(learning_rate)
+        d_opt = tf.compat.v1.train.AdamOptimizer(learning_rate)
         self.d_updates = d_opt.minimize(self.pre_loss, var_list=self.d_params)
-        self.reward_logits = tf.reduce_sum(tf.multiply(self.u_embedding, self.i_embedding),1) + self.i_bias
+        self.reward_logits = tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.i_embedding),
+                                           axis=1) + self.i_bias
         self.reward = 2 * (tf.sigmoid(self.reward_logits) - 0.5)
-        self.all_logits = tf.reduce_sum(tf.multiply(self.u_embedding, self.item_embeddings), 1) + self.item_bias
-        self.NLL = -tf.reduce_mean(tf.log(tf.gather(tf.reshape(tf.nn.softmax(tf.reshape(self.all_logits, [1, -1])), [-1]), self.i)))
+        self.all_logits = tf.reduce_sum(input_tensor=tf.multiply(self.u_embedding, self.item_embeddings),
+                                        axis=1) + self.item_bias
+        self.NLL = -tf.reduce_mean(input_tensor=tf.math.log(
+            tf.gather(tf.reshape(tf.nn.softmax(tf.reshape(self.all_logits, [1, -1])), [-1]), self.i)))
 
 class IRGAN(DeepRecommender):
     def __init__(self,conf,trainingSet=None,testSet=None,fold='[1]'):
@@ -111,7 +119,7 @@ class IRGAN(DeepRecommender):
 
     def buildModel(self):
         # minimax training
-        init = tf.global_variables_initializer()
+        init = tf.compat.v1.global_variables_initializer()
         self.sess.run(init)
         #pretrain the discriminator
         # for i in range(100):
