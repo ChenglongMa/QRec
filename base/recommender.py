@@ -151,9 +151,9 @@ class Recommender(object):
         fileName = self.suffix + '-measure-rating' + self.foldInfo + '.csv'
         self.measure, mae, rmse = Measure.ratingMeasure(self.data.testData)
         evaDF = pd.DataFrame([
-            [algo_name, 'MAE', mae, -1, self.iteration],
-            [algo_name, 'RMSE', rmse, -1, self.iteration]
-        ], columns='algo metric value k iteration'.split())
+            [algo_name, 'MAE', mae, -1, self.iteration, self.test_on],
+            [algo_name, 'RMSE', rmse, -1, self.iteration, self.test_on]
+        ], columns='algo metric value k iteration stage'.split())
         evaDF.to_csv(f'{outDir}/{fileName}', index=False)
 
         self.log.add('###Evaluation Results###')
@@ -207,13 +207,13 @@ class Recommender(object):
         precisions, recalls = precision_recall_at_k(predictions, k=k, threshold=2)  # TODO: update threshold
         precision = sum(prec for prec in precisions.values()) / len(precisions)
         recall = sum(rec for rec in recalls.values()) / len(recalls)
-        eva_res.append([algo_name, 'Precision', precision, k, self.iteration])
-        eva_res.append([algo_name, 'Recall', recall, k, self.iteration])
+        eva_res.append([algo_name, 'Precision', precision, k, self.iteration, self.test_on])
+        eva_res.append([algo_name, 'Recall', recall, k, self.iteration, self.test_on])
 
         gini = gini_index(pred_df, k=k)
-        eva_res.append([algo_name, 'Gini', gini, k, self.iteration])
+        eva_res.append([algo_name, 'Gini', gini, k, self.iteration, self.test_on])
         self.log.add('###Evaluation Results###')
-        resDF = pd.DataFrame(eva_res, columns='algo metric value k iteration'.split())
+        resDF = pd.DataFrame(eva_res, columns='algo metric value k iteration stage'.split())
         resDF.to_csv(f'{outDir}/{fileName}', index=False)
         print('The result of %s %s:\n' % (self.algorName, self.foldInfo))
         print(resDF)
