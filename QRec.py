@@ -103,8 +103,7 @@ class QRec(object):
                     total += float(self.measure[j][i].split(':')[1])
                 res.append(measure + ':' + str(total / k) + '\n')
             # output result
-            currentTime = 'now'
-            # currentTime = strftime("%Y-%m-%d %H-%M-%S", localtime(time()))
+            currentTime = strftime("%Y-%m-%d %H-%M-%S", localtime(time()))
             outDir = LineConfig(self.config['output.setup'])['-dir']
             fileName = self.config['model.name'] + '@' + currentTime + '-' + str(k) + '-fold-cv' + '.txt'
             FileIO.writeFile(outDir, fileName, res)

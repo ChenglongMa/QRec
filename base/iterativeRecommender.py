@@ -110,7 +110,7 @@ class IterativeRecommender(Recommender):
             prediction = self.predictForRating(user, item)
             pred = self.checkRatingBoundary(prediction)
             res.append([user,item,rating,pred])
-        self.measure = Measure.ratingMeasure(res)
+        self.measure = Measure.ratingMeasure(res)[0]
         return self.measure
 
     def ranking_performance(self, iteration):

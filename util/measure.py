@@ -13,7 +13,7 @@ class Measure(object):
         measure.append('MAE:' + str(mae) + '\n')
         rmse = Measure.RMSE(res)
         measure.append('RMSE:' + str(rmse) + '\n')
-        return measure
+        return measure, mae, rmse
 
     @staticmethod
     def hits(origin, res):

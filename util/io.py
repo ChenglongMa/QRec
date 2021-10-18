@@ -1,7 +1,9 @@
 import os.path
-from os import makedirs,remove
-from re import compile,findall,split
+from os import makedirs, remove
+from re import compile, findall, split
 from .config import LineConfig
+
+
 class FileIO(object):
     def __init__(self):
         pass
@@ -16,10 +18,10 @@ class FileIO(object):
     #         f.write(str(content))
 
     @staticmethod
-    def writeFile(dir,file,content,op = 'w'):
+    def writeFile(dir, file, content, op='w'):
         if not os.path.exists(dir):
             os.makedirs(dir)
-        with open(dir+file,op) as f:
+        with open(f'{dir}/{file}', op) as f:
             f.writelines(content)
 
     @staticmethod
@@ -28,7 +30,7 @@ class FileIO(object):
             remove(filePath)
 
     @staticmethod
-    def loadDataSet(conf, file, bTest=False,binarized = False, threshold = 3.0):
+    def loadDataSet(conf, file, bTest=False, binarized=False, threshold=3.0):
         trainingData = []
         testData = []
         ratingConfig = LineConfig(conf['ratings.setup'])
@@ -45,21 +47,21 @@ class FileIO(object):
         order = ratingConfig['-columns'].strip().split()
         delim = ' |,|\t'
         if ratingConfig.contains('-delim'):
-            delim=ratingConfig['-delim']
+            delim = ratingConfig['-delim']
         for lineNo, line in enumerate(ratings):
-            items = split(delim,line.strip())
+            items = split(delim, line.strip())
             if not bTest and len(order) < 2:
                 print('The rating file is not in a correct format. Error: Line num %d' % lineNo)
                 exit(-1)
             try:
                 userId = items[int(order[0])]
                 itemId = items[int(order[1])]
-                if len(order)<3:
-                    rating = 1 #default value
+                if len(order) < 3:
+                    rating = 1  # default value
                 else:
-                    rating  = items[int(order[2])]
+                    rating = items[int(order[2])]
                 if binarized:
-                    if float(items[int(order[2])])<threshold:
+                    if float(items[int(order[2])]) < threshold:
                         continue
                     else:
                         rating = 1
@@ -111,7 +113,3 @@ class FileIO(object):
                 weight = float(items[int(order[2])])
             relation.append([userId1, userId2, weight])
         return relation
-
-
-
-

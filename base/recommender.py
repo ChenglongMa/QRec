@@ -28,6 +28,9 @@ class Recommender(object):
         self.isOutput = True
         self.data = Rating(self.config, trainingSet, testSet)
         self.foldInfo = fold
+        self.iteration = -1
+        self.test_on = ''
+        self.suffix = ''
         self.evalSettings = LineConfig(self.config['evaluation.setup'])
         self.measure = []
         self.recOutput = []
@@ -61,6 +64,9 @@ class Recommender(object):
         self.output = LineConfig(self.config['output.setup'])
         self.isOutput = self.output.isMainOn()
         self.ranking = LineConfig(self.config['item.ranking'])
+        self.iteration = self.config['iteration']
+        self.test_on = self.config['testOn']
+        self.suffix = f'{self.test_on}_iter_{self.iteration}'
 
     def printAlgorConfig(self):
         "show model's configuration"
@@ -115,13 +121,9 @@ class Recommender(object):
             return round(prediction, 3)
 
     def evalRatings(self):
-        algo_name = self.config['model.name']
-        iteration = self.config['iteration']
-        test_on = self.config['testOn']
-        suffix = f'_iter_{test_on}_{iteration}'
-
+        algo_name = self.algorName
         res = list()  # used to contain the text of the result
-        res.append('uid  iid  r_ui  est\n')
+        res.append('uid,iid,r_ui,est\n')
         # predict
         for ind, entry in enumerate(self.data.testData):
             user, item, rating = entry
@@ -133,28 +135,33 @@ class Recommender(object):
             pred = self.checkRatingBoundary(prediction)
             # add prediction in order to measure
             self.data.testData[ind].append(pred)
-            res.append(user + ' ' + item + ' ' + str(rating) + ' ' + str(pred) + '\n')
+            res.append(user + ',' + item + ',' + str(rating) + ',' + str(pred) + '\n')
 
-        currentTime = strftime("%Y-%m-%d %H-%M-%S", localtime(time()))
+        # currentTime = strftime("%Y-%m-%d %H-%M-%S", localtime(time()))
         # output prediction result
         if self.isOutput:
             outDir = self.output['-dir'] + algo_name
             os.makedirs(outDir, exist_ok=True)
-            fileName = suffix + '-rating-predictions' + self.foldInfo + '.txt'
+            fileName = self.suffix + '-rating-predictions' + self.foldInfo + '.csv'
             FileIO.writeFile(outDir, fileName, res)
             print('The result has been output to ', abspath(outDir), '.')
         # output evaluation result
         outDir = self.output['-dir'] + algo_name
         os.makedirs(outDir, exist_ok=True)
-        fileName = suffix + '-measure' + self.foldInfo + '.txt'
-        self.measure = Measure.ratingMeasure(self.data.testData)
-        FileIO.writeFile(outDir, fileName, self.measure)
+        fileName = self.suffix + '-measure-rating' + self.foldInfo + '.csv'
+        self.measure, mae, rmse = Measure.ratingMeasure(self.data.testData)
+        evaDF = pd.DataFrame([
+            [algo_name, 'MAE', mae, -1, self.iteration],
+            [algo_name, 'RMSE', rmse, -1, self.iteration]
+        ], columns='algo metric value k iteration'.split())
+        evaDF.to_csv(f'{outDir}/{fileName}', index=False)
+
         self.log.add('###Evaluation Results###')
         self.log.add(self.measure)
         print('The result of %s %s:\n%s' % (self.algorName, self.foldInfo, ''.join(self.measure)))
 
     def evalRanking(self):
-        algo_name = self.config['model.name']
+        algo_name = self.algorName
         if self.ranking.contains('-topN'):
             Ns = self.ranking['-topN'].split(',')
             Ns = [int(num) for num in Ns]
@@ -179,15 +186,13 @@ class Recommender(object):
                 predictions.append([user, item_name, true_r, candidates[self.data.item[item_name]]])
         pred_df = pd.DataFrame(predictions, columns='uid iid r_ui est'.split())
 
-        iteration = self.config['iteration']
-        test_on = self.config['testOn']
-        suffix = f'iter_{test_on}_{iteration}'
         # currentTime = strftime("%Y-%m-%d %H-%M-%S", localtime(time()))
         # output prediction result
+        suffix = f'{self.suffix}_top_{k}'
         if self.isOutput:
             outDir = self.output['-dir'] + algo_name
             os.makedirs(outDir, exist_ok=True)
-            fileName = suffix + '-top-' + str(k) + 'items' + self.foldInfo + '.csv'
+            fileName = suffix + '-items' + self.foldInfo + '.csv'
             pred_df.to_csv(f'{outDir}/{fileName}', index=False)
             print('The result has been output to ', abspath(outDir), '.')
         # output evaluation result
@@ -195,21 +200,20 @@ class Recommender(object):
             # no evalutation
             exit(0)
         # Rank evaluation
-        res = []
+        eva_res = []
         outDir = self.output['-dir'] + algo_name
         os.makedirs(outDir, exist_ok=True)
-        fileName = suffix + '-measure' + self.foldInfo + '.csv'
+        fileName = suffix + '-measure-rank' + self.foldInfo + '.csv'
         precisions, recalls = precision_recall_at_k(predictions, k=k, threshold=2)  # TODO: update threshold
         precision = sum(prec for prec in precisions.values()) / len(precisions)
         recall = sum(rec for rec in recalls.values()) / len(recalls)
-        res.append([algo_name, 'Precision', precision, k, iteration])
-        res.append([algo_name, 'Recall', recall, k, iteration])
+        eva_res.append([algo_name, 'Precision', precision, k, self.iteration])
+        eva_res.append([algo_name, 'Recall', recall, k, self.iteration])
 
         gini = gini_index(pred_df, k=k)
-        res.append([algo_name, 'Gini', gini, k, iteration])
+        eva_res.append([algo_name, 'Gini', gini, k, self.iteration])
         self.log.add('###Evaluation Results###')
-        resDF = pd.DataFrame(res, columns='algo metric value k iteration'.split())
-        resDF.loc[resDF.iteration == 11, 'iteration'] = -1
+        resDF = pd.DataFrame(eva_res, columns='algo metric value k iteration'.split())
         resDF.to_csv(f'{outDir}/{fileName}', index=False)
         print('The result of %s %s:\n' % (self.algorName, self.foldInfo))
         print(resDF)
