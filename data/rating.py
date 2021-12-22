@@ -15,7 +15,7 @@ class Rating(object):
         self.id2user = {}
         self.id2item = {}  # format: itemInnerID: itemName
         self.userMeans = {}  # mean values of users's ratings
-        self.itemMeans = {}  # mean values of items's ratings
+        self.itemMeans = {}  # mean values of items's ratings, format: itemName: mean rating
         self.globalMean = 0
         self.trainSet_u = defaultdict(dict)
         self.trainSet_i = defaultdict(dict)

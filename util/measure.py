@@ -1,5 +1,10 @@
 import math
-from collections import defaultdict
+
+import numpy as np
+import pandas as pd
+
+from util import qmath
+from util.metric import gini_index
 
 
 class Measure(object):
@@ -25,97 +30,41 @@ class Measure(object):
         return hitCount
 
     @staticmethod
-    def rankingMeasure(origin, res, N):
+    def rankingMeasure(origin, res, N, data=None):
         measure = []
         for n in N:
-            top_n = {}  # len(top_n) == n_users, format: <uid, list(<iid, est>)>
+            predicted = {}
             for user in res:
-                top_n[user] = res[user][:n]
+                predicted[user] = res[user][:n]
             indicators = []
-            if len(origin) != len(top_n):
-                print('The Lengths of test set and top_n set are not match!')
+            if len(origin) != len(predicted):
+                print('The Lengths of test set and predicted set are not match!')
                 exit(-1)
-            # hits = Measure.hits(origin, top_n)
-            # prec = Measure.precision(hits, n)
-            # indicators.append('Precision:' + str(prec) + '\n')
-            # recall = Measure.recall(hits, origin)
-            # indicators.append('Recall:' + str(recall) + '\n')
-
-            # TODO: updated by mcl
-            precisions, recalls = Measure.precision_recall_at_k(origin, res, k=n, threshold=2)  # TODO: update threshold
-            # Precision and recall can then be averaged over all users
-            precision = sum(prec for prec in precisions.values()) / len(precisions)
-            indicators.append('Precision:' + str(precision) + '\n')
-            recall = sum(rec for rec in recalls.values()) / len(recalls)
+            gini = Measure.gini(predicted, n)
+            indicators.append('Gini:' + str(gini) + '\n')
+            hits = Measure.hits(origin, predicted)
+            prec = Measure.precision(hits, n)
+            indicators.append('Precision:' + str(prec) + '\n')
+            recall = Measure.recall(hits, origin)
             indicators.append('Recall:' + str(recall) + '\n')
-            F1 = Measure.F1(precision, recall)
+            F1 = Measure.F1(prec, recall)
             indicators.append('F1:' + str(F1) + '\n')
-            # MAP = Measure.MAP(origin, top_n, n)
+            # MAP = Measure.MAP(origin, predicted, n)
             # indicators.append('MAP:' + str(MAP) + '\n')
-            NDCG = Measure.NDCG(origin, top_n, n)
+            NDCG = Measure.NDCG(origin, predicted, n)
             indicators.append('NDCG:' + str(NDCG) + '\n')
             # AUC = Measure.AUC(origin,res,rawRes)
             # measure.append('AUC:' + str(AUC) + '\n')
             measure.append('Top ' + str(n) + '\n')
             measure += indicators
-        return measure
+
+            MIUD = Measure.mean_intra_user_diversity(predicted, n, data=data)
+        return measure, prec, recall, F1, NDCG, gini, MIUD
 
     @staticmethod
     def precision(hits, N):
         prec = sum([hits[user] for user in hits])
         return prec / (len(hits) * N)
-
-    # @staticmethod
-    # def precision(origin, top_n, threshold):
-    #     precs = [len([i for i, _ in irs if origin[u][i] >= threshold]) / len(irs) for u, irs in top_n.items()]
-    #     return np.mean(precs)
-
-    @staticmethod
-    def precision_recall_at_k(true_rs: dict, pred_rs: dict, k, threshold):
-        # pred_dict = defaultdict(dict)
-        # for uid, irs in pred_rs.items():
-        #     for iid, est in irs:
-        #         pred_dict[uid][iid] = est
-
-        user_est_true = defaultdict(list)
-        for uid, irs in pred_rs.items():
-            for iid, est in irs:
-                true_r = true_rs[uid][iid]
-                user_est_true[uid].append((est, true_r))
-        # for uid, irdict in true_rs.items():
-        #     for iid, true_r in irdict.items():
-        #         est = pred_dict[uid][iid]
-        #         user_est_true[uid].append((est, true_r))
-
-        precisions = dict()
-        recalls = dict()
-        for uid, user_ratings in user_est_true.items():
-            # Sort user ratings by estimated value (i.e., x[0])
-            user_ratings.sort(key=lambda x: x[0], reverse=True)
-
-            # Number of relevant items
-            n_rel = sum((true_r >= threshold) for (_, true_r) in user_ratings)
-
-            # Number of recommended items in top k
-            n_rec_k = min(len(user_ratings), k)
-            # n_rec_k = sum((est >= threshold) for (est, _) in user_ratings[:k])
-            # n_rec_k = sum((true_r >= threshold) for (est, true_r) in user_ratings[:k])
-
-            # Number of relevant and recommended items in top k
-            # n_rel_and_rec_k = sum(((true_r >= threshold) and (est >= threshold))
-            n_rel_and_rec_k = sum((true_r >= threshold) for (est, true_r) in user_ratings[:k])
-
-            # Precision@K: Proportion of recommended items that are relevant
-            # When n_rec_k is 0, Precision is undefined. We here set it to 0.
-
-            precisions[uid] = n_rel_and_rec_k / n_rec_k if n_rec_k != 0 else 0
-
-            # Recall@K: Proportion of relevant items that are recommended
-            # When n_rel is 0, Recall is undefined. We here set it to 0.
-
-            recalls[uid] = n_rel_and_rec_k / n_rel if n_rel != 0 else 0
-
-        return precisions, recalls
 
     # @staticmethod
     # def MAP(origin, res, N):
@@ -201,3 +150,29 @@ class Measure(object):
         if count == 0:
             return error
         return math.sqrt(error / count)
+
+    @staticmethod
+    def gini(top_k: dict, k):
+        """
+        top_k: format: {uid: [(iid, est), ...]}
+        """
+        predictions = []
+        for uid, ratings in top_k.items():
+            predictions += [(uid, iid, est) for iid, est in ratings]
+        predictions = pd.DataFrame(predictions, columns='uid iid est'.split())
+        return gini_index(predictions, k)
+
+    @staticmethod
+    def mean_intra_user_diversity(top_k: dict, k, data):
+        if data is None:
+            return None
+        return np.mean([Measure.intra_user_diversity(ratings, k, data) for _, ratings in top_k.items()])
+
+    @staticmethod
+    def intra_user_diversity(u_top_k: list, k, data):
+        _sum = 0
+        for i, _ in u_top_k:
+            for j, _ in u_top_k:
+                sim = 1 if i == j else qmath.similarity(data.sCol(i), data.sCol(j), 'cosine')
+                _sum += 1 - sim
+        return _sum / (k * (k + 1))

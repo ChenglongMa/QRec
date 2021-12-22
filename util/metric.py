@@ -2,6 +2,8 @@ from collections import defaultdict
 
 import pandas as pd
 
+from data.similarity import Similarity
+
 
 def precision_recall_at_k(predictions: list, k=10, threshold=3.5):
     """Return precision and recall at k metrics for each user"""
@@ -58,3 +60,46 @@ def gini_index(predictions: pd.DataFrame, k=10):
     gi /= n_items - 1
     # gi = 1 - gi
     return gi
+
+
+def mean_intra_user_diversity(predictions, n, similarity: Similarity):
+    """
+
+    :param predictions: list of Prediction objects
+    :param n: The number of recommendation to output for each user.
+    :param similarity: The similarity class
+    :return:
+    """
+    # First map the predictions to each user.
+    top_n = defaultdict(list)
+    for uid, iid, true_r, est, *_ in predictions:
+        top_n[uid].append((iid, est))
+
+    n_users = len(top_n)
+    _sum = 0
+    # Then sort the predictions for each user and retrieve the k highest ones.
+    for uid, recommendations in top_n.items():
+        recommendations.sort(key=lambda x: x[1], reverse=True)
+        top_recs = recommendations[:n]
+        _sum += intra_user_diversity(top_recs, similarity)
+
+    return _sum / n_users
+
+
+def intra_user_diversity(recommendations: list, similarity: Similarity):
+    """
+    see: 3.2 Average Intra-List Distance in
+        Castells, P., Hurley, N. J., & Vargas, S. (2015).
+        Novelty and Diversity in Recommender Systems. In F. Ricci, L. Rokach, & B. Shapira (Eds.),
+        Recommender Systems Handbook (pp. 881–918). Springer US. https://doi.org/10.1007/978-1-4899-7637-6_26
+
+    :param recommendations: list of tuples <item, rating>
+    :param similarity:
+    :return:
+    """
+    k = len(recommendations)
+    _sum = 0
+    for i, _ in recommendations:
+        for j, _ in recommendations:
+            _sum += 1 - similarity.get_similarity(i, j)
+    return _sum / (k * (k + 1))

@@ -1,6 +1,6 @@
 from base.iterativeRecommender import IterativeRecommender
 from util import config
-from random import shuffle,choice
+from random import shuffle, choice
 from collections import defaultdict
 import numpy as np
 from util.qmath import cosine
@@ -127,11 +127,10 @@ import gensim.models.word2vec as w2v
 #             self.coding(root.right,prefix+'1',hierarchy+1)
 
 class CUNE_MF(IterativeRecommender):
-    def __init__(self,conf,trainingSet=None,testSet=None,fold='[1]'):
-        super(CUNE_MF, self).__init__(conf,trainingSet,testSet,fold)
+    def __init__(self, conf, trainingSet=None, testSet=None, fold='[1]'):
+        super(CUNE_MF, self).__init__(conf, trainingSet, testSet, fold)
         self.nonLeafVec = {}
         self.leafVec = {}
-
 
     def readConfiguration(self):
         super(CUNE_MF, self).readConfiguration()
@@ -150,21 +149,21 @@ class CUNE_MF(IterativeRecommender):
         print('Walks count per user', self.walkCount)
         print('Length of each walk', self.walkLength)
         print('Dimension of user embedding', self.walkDim)
-        print('='*80)
+        print('=' * 80)
 
     def buildModel(self):
         print('Kind Note: This method will probably take much time.')
-        #build C-U-NET
+        # build C-U-NET
         print('Building collaborative user network...')
-        #filter isolated nodes
+        # filter isolated nodes
         self.itemNet = {}
         for item in self.data.trainSet_i:
-            if len(self.data.trainSet_i[item])>1:
+            if len(self.data.trainSet_i[item]) > 1:
                 self.itemNet[item] = self.data.trainSet_i[item]
         self.filteredRatings = defaultdict(list)
         for item in self.itemNet:
             for user in self.itemNet[item]:
-                if self.itemNet[item][user]>=1:
+                if self.itemNet[item][user] >= 1:
                     self.filteredRatings[user].append(item)
         self.CUNet = defaultdict(list)
         for user1 in self.filteredRatings:
@@ -174,11 +173,10 @@ class CUNE_MF(IterativeRecommender):
                     s2 = set(self.filteredRatings[user2])
                     weight = len(s1.intersection(s2))
                     if weight > 0:
-                        self.CUNet[user1]+=[user2]*weight
+                        self.CUNet[user1] += [user2] * weight
 
-
-        #build Huffman Tree First
-        #get weight
+        # build Huffman Tree First
+        # get weight
         # print 'Building Huffman tree...'
         # #To accelerate the method, the weight is estimated roughly
         # nodes = {}
@@ -199,7 +197,6 @@ class CUNE_MF(IterativeRecommender):
         # print 'Coding for all users...'
         # self.HTree.coding(self.HTree.root,'',0)
 
-
         print('Generating random deep walks...')
         self.walks = []
         self.visited = defaultdict(dict)
@@ -207,23 +204,23 @@ class CUNE_MF(IterativeRecommender):
             for t in range(self.walkCount):
                 path = [user]
                 lastNode = user
-                for i in range(1,self.walkLength):
+                for i in range(1, self.walkLength):
                     nextNode = choice(self.CUNet[lastNode])
-                    count=0
+                    count = 0
                     while nextNode in self.visited[lastNode]:
                         nextNode = choice(self.CUNet[lastNode])
-                        #break infinite loop
-                        count+=1
-                        if count==10:
+                        # break infinite loop
+                        count += 1
+                        if count == 10:
                             break
                     path.append(nextNode)
                     self.visited[user][nextNode] = 1
                     lastNode = nextNode
                 self.walks.append(path)
-                #print path
+                # print path
         shuffle(self.walks)
 
-        #Training get top-k friends
+        # Training get top-k friends
         print('Generating user embedding...')
         # epoch = 1
         # while epoch <= self.epoch:
@@ -250,7 +247,7 @@ class CUNE_MF(IterativeRecommender):
         #                         loss += -log(sigmoid(w.dot(x)),2)
         #     print 'epoch:', epoch, 'loss:', loss
         #     epoch+=1
-        model = w2v.Word2Vec(self.walks, size=self.walkDim, window=5, min_count=0, iter=3)
+        model = w2v.Word2Vec(self.walks, vector_size=self.walkDim, window=5, min_count=0, epochs=3)
         print('User embedding generated.')
 
         print('Constructing similarity matrix...')
@@ -267,16 +264,16 @@ class CUNE_MF(IterativeRecommender):
                 if user1 != user2:
                     u2 = self.data.user[user2]
                     self.W[u2] = model.wv[user2]
-                    sims.append((user2,cosine(self.W[u1],self.W[u2])))
+                    sims.append((user2, cosine(self.W[u1], self.W[u2])))
             self.topKSim[user1] = sorted(sims, key=lambda d: d[1], reverse=True)[:self.topK]
             i += 1
             if i % 200 == 0:
                 print('progress:', i, '/', len(self.CUNet))
         print('Similarity matrix finished.')
-        
-        #print self.topKSim
 
-        #matrix decomposition
+        # print self.topKSim
+
+        # matrix decomposition
         print('Decomposing...')
 
         epoch = 0
@@ -284,24 +281,23 @@ class CUNE_MF(IterativeRecommender):
             self.loss = 0
             for entry in self.data.trainingData:
                 user, item, rating = entry
-                u = self.data.user[user] #get user id
-                i = self.data.item[item] #get item id
+                u = self.data.user[user]  # get user id
+                i = self.data.item[item]  # get item id
                 error = rating - self.P[u].dot(self.Q[i])
-                self.loss += error**2
+                self.loss += error ** 2
                 p = self.P[u]
                 q = self.Q[i]
-                #update latent vectors
-                self.P[u] += self.lRate*(error*q-self.regU*p)
-                self.Q[i] += self.lRate*(error*p-self.regI*q)
+                # update latent vectors
+                self.P[u] += self.lRate * (error * q - self.regU * p)
+                self.Q[i] += self.lRate * (error * p - self.regI * q)
             for user in self.CUNet:
                 u = self.data.user[user]
                 friends = self.topKSim[user]
                 for friend in friends:
                     uf = self.data.user[friend[0]]
-                    self.P[u] -= self.lRate*(self.P[u]-self.P[uf])*self.alpha
-                    self.loss += self.alpha * (self.P[u]-self.P[uf]).dot(self.P[u]-self.P[uf])
-            self.loss += self.regU*(self.P*self.P).sum() + self.regI*(self.Q*self.Q).sum()
+                    self.P[u] -= self.lRate * (self.P[u] - self.P[uf]) * self.alpha
+                    self.loss += self.alpha * (self.P[u] - self.P[uf]).dot(self.P[u] - self.P[uf])
+            self.loss += self.regU * (self.P * self.P).sum() + self.regI * (self.Q * self.Q).sum()
             epoch += 1
             if self.isConverged(epoch):
                 break
-

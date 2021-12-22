@@ -1,14 +1,15 @@
 from base.iterativeRecommender import IterativeRecommender
 import numpy as np
 
+
 class SVD(IterativeRecommender):
-    def __init__(self,conf,trainingSet=None,testSet=None,fold='[1]'):
-        super(SVD, self).__init__(conf,trainingSet,testSet,fold)
+    def __init__(self, conf, trainingSet=None, testSet=None, fold='[1]'):
+        super(SVD, self).__init__(conf, trainingSet, testSet, fold)
 
     def initModel(self):
         super(SVD, self).initModel()
-        self.Bu = np.random.rand(self.data.trainingSize()[0])/5  # bias value of user
-        self.Bi = np.random.rand(self.data.trainingSize()[1])/5  # bias value of item
+        self.Bu = np.random.rand(self.data.trainingSize()[0]) / 5  # bias value of user
+        self.Bi = np.random.rand(self.data.trainingSize()[1]) / 5  # bias value of item
 
     def buildModel(self):
         epoch = 0
@@ -18,19 +19,19 @@ class SVD(IterativeRecommender):
                 user, item, rating = entry
                 u = self.data.user[user]
                 i = self.data.item[item]
-                error = rating-self.predictForRating(user, item)
-                self.loss+=error**2
+                error = rating - self.predictForRating(user, item)
+                self.loss += error ** 2
                 p = self.P[u]
                 q = self.Q[i]
                 bu = self.Bu[u]
                 bi = self.Bi[i]
-                #update latent vectors
-                self.P[u] += self.lRate*(error*q-self.regU*p)
-                self.Q[i] += self.lRate*(error*p-self.regI*q)
-                self.Bu[u] += self.lRate*(error-self.regB*bu)
-                self.Bi[i] += self.lRate*(error-self.regB*bi)
-            self.loss += self.regU*(self.P*self.P).sum() + self.regI*(self.Q*self.Q).sum()\
-               +self.regB*((self.Bu*self.Bu).sum()+(self.Bi*self.Bi).sum())
+                # update latent vectors
+                self.P[u] += self.lRate * (error * q - self.regU * p)
+                self.Q[i] += self.lRate * (error * p - self.regI * q)
+                self.Bu[u] += self.lRate * (error - self.regB * bu)
+                self.Bi[i] += self.lRate * (error - self.regB * bi)
+            self.loss += self.regU * (self.P * self.P).sum() + self.regI * (self.Q * self.Q).sum() \
+                         + self.regB * ((self.Bu * self.Bu).sum() + (self.Bi * self.Bi).sum())
             epoch += 1
             self.isConverged(epoch)
 
@@ -69,7 +70,8 @@ class SVD(IterativeRecommender):
                          feed_dict={self.r: rating, self.u_idx: user_idx, self.v_idx: item_idx, global_mean: g_mean})
 
                 print('epoch:', step, 'loss:', sess.run(self.total_loss,
-                                                            feed_dict={self.r: rating, self.u_idx: user_idx, self.v_idx: item_idx,global_mean:g_mean}))
+                                                        feed_dict={self.r: rating, self.u_idx: user_idx,
+                                                                   self.v_idx: item_idx, global_mean: g_mean}))
             self.P = sess.run(self.U)
             self.Q = sess.run(self.V)
             self.Bu = sess.run(self.U_bias)
@@ -79,15 +81,14 @@ class SVD(IterativeRecommender):
         if self.data.containsUser(u) and self.data.containsItem(i):
             u = self.data.user[u]
             i = self.data.item[i]
-            return self.P[u].dot(self.Q[i])+self.data.globalMean+self.Bi[i]+self.Bu[u]
+            return self.P[u].dot(self.Q[i]) + self.data.globalMean + self.Bi[i] + self.Bu[u]
         else:
             return self.data.globalMean
 
-    def predictForRanking(self,u):
+    def predictForRanking(self, u):
         'invoked to rank all the items for the user'
         if self.data.containsUser(u):
             u = self.data.getUserId(u)
-            return self.Q.dot(self.P[u])+self.data.globalMean + self.Bi + self.Bu[u]
+            return self.Q.dot(self.P[u]) + self.data.globalMean + self.Bi + self.Bu[u]
         else:
             return [self.data.globalMean] * self.num_items
-

@@ -218,7 +218,76 @@ class Recommender(object):
         print('The result of %s %s:\n' % (self.algorName, self.foldInfo))
         print(resDF)
 
-    def evalRankingOld(self):
+    def evalRanking2(self):
+        algo_name = self.algorName
+
+        if self.ranking.contains('-topN'):
+            top = self.ranking['-topN'].split(',')
+            top = [int(num) for num in top]
+            k = int(top[-1])
+            if k > 100 or k < 0:
+                print('N can not be larger than 100! It has been reassigned with 10')
+                k = 10
+            if k > len(self.data.item):
+                k = len(self.data.item)
+        else:
+            print('No correct evaluation metric is specified!')
+            exit(-1)
+        self.recOutput.append('uid,iid,r_ui,est\n')
+        # predict
+        recList = {}
+        userCount = len(self.data.testSet_u)
+        # rawRes = {}
+        for i, user in enumerate(self.data.testSet_u):
+            candidates = self.predictForRanking(user)
+            # predictedItems = denormalize(predictedItems, self.data.rScale[-1], self.data.rScale[0])
+            ratedList, ratingList = self.data.userRated(user)
+            for item in ratedList:
+                candidates[self.data.item[item]] = 0
+            ids, scores = find_k_largest(k, candidates)
+            item_names = [self.data.id2item[iid] for iid in ids]
+            recList[user] = list(zip(item_names, scores))
+            if i % 100 == 0:
+                print(self.algorName, self.foldInfo, 'progress:' + str(i) + '/' + str(userCount))
+
+            for itemName, est in recList[user]:
+                r_ui = self.data.testSet_u[user].get(itemName, -100)
+                line = f'{user},{itemName},{r_ui},{est}\n'
+                self.recOutput.append(line)
+
+        # output prediction result
+        suffix = f'{self.suffix}_top_{k}'
+        if self.isOutput:
+            outDir = self.output['-dir'] + algo_name
+            os.makedirs(outDir, exist_ok=True)
+            fileName = suffix + '-items' + self.foldInfo + '.csv'
+            FileIO.writeFile(outDir, fileName, self.recOutput)
+            print('The result has been output to ', abspath(outDir), '.')
+        # output evaluation result
+        if self.evalSettings.contains('-predict'):
+            # no evalutation
+            exit(0)
+        eva_res = []
+        outDir = self.output['-dir'] + algo_name
+        os.makedirs(outDir, exist_ok=True)
+        fileName = suffix + '-measure-rank' + self.foldInfo + '.csv'
+
+        self.measure, prec, recall, F1, NDCG, gini, MIUD = Measure.rankingMeasure(self.data.testSet_u, recList, top,
+                                                                                  self.data)
+        eva_res.append([algo_name, 'Precision', prec, k, self.iteration, self.test_on])
+        eva_res.append([algo_name, 'Recall', recall, k, self.iteration, self.test_on])
+        eva_res.append([algo_name, 'F1', F1, k, self.iteration, self.test_on])
+        eva_res.append([algo_name, 'nDCG', NDCG, k, self.iteration, self.test_on])
+        eva_res.append([algo_name, 'Gini', gini, k, self.iteration, self.test_on])
+        eva_res.append([algo_name, 'MIUD', MIUD, k, self.iteration, self.test_on])
+        resDF = pd.DataFrame(eva_res, columns='algo metric value k iteration stage'.split())
+        resDF.to_csv(f'{outDir}/{fileName}', index=False)
+        self.log.add('###Evaluation Results###')
+        self.log.add(self.measure)
+        # FileIO.writeFile(outDir, fileName, self.measure)
+        print('The result of %s %s:\n%s' % (self.algorName, self.foldInfo, ''.join(self.measure)))
+
+    def evalRankingBackup(self):
         """
         @Deprecated by mcl
         """
@@ -271,7 +340,7 @@ class Recommender(object):
             exit(0)
         outDir = self.output['-dir']
         fileName = self.config['model.name'] + '@' + currentTime + '-measure' + self.foldInfo + '.txt'
-        self.measure = Measure.rankingMeasure(self.data.testSet_u, recList, top)
+        self.measure = Measure.rankingMeasure(self.data.testSet_u, recList, top)[0]
         self.log.add('###Evaluation Results###')
         self.log.add(self.measure)
         FileIO.writeFile(outDir, fileName, self.measure)
@@ -301,7 +370,7 @@ class Recommender(object):
         # rating prediction or item ranking
         print('Predicting %s...' % self.foldInfo)
         if self.ranking.isMainOn():
-            self.evalRanking()
+            self.evalRanking2()  # TODO
         else:
             self.evalRatings()
         # save model

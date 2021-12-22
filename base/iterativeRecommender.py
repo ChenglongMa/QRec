@@ -4,9 +4,11 @@ import numpy as np
 from random import shuffle
 from util.measure import Measure
 from util.qmath import find_k_largest
+
+
 class IterativeRecommender(Recommender):
-    def __init__(self,conf,trainingSet,testSet,fold='[1]'):
-        super(IterativeRecommender, self).__init__(conf,trainingSet,testSet,fold)
+    def __init__(self, conf, trainingSet, testSet, fold='[1]'):
+        super(IterativeRecommender, self).__init__(conf, trainingSet, testSet, fold)
         self.bestPerformance = []
 
     def readConfiguration(self):
@@ -23,17 +25,17 @@ class IterativeRecommender(Recommender):
             self.batch_size = int(self.config['batch_size'])
         # regularization parameter
         regular = config.LineConfig(self.config['reg.lambda'])
-        self.regU,self.regI,self.regB= float(regular['-u']),float(regular['-i']),float(regular['-b'])
+        self.regU, self.regI, self.regB = float(regular['-u']), float(regular['-i']), float(regular['-b'])
 
     def printAlgorConfig(self):
         super(IterativeRecommender, self).printAlgorConfig()
         print('Embedding Dimension:', self.emb_size)
         print('Maximum Iteration:', self.maxEpoch)
         print('Regularization parameter: regU %.3f, regI %.3f, regB %.3f' % (self.regU, self.regI, self.regB))
-        print('='*80)
+        print('=' * 80)
 
     def initModel(self):
-        self.P = np.random.rand(len(self.data.user), self.emb_size) / 3 # latent user matrix
+        self.P = np.random.rand(len(self.data.user), self.emb_size) / 3  # latent user matrix
         self.Q = np.random.rand(len(self.data.item), self.emb_size) / 3  # latent item matrix
         self.loss, self.lastLoss = 0, 0
 
@@ -52,7 +54,7 @@ class IterativeRecommender(Recommender):
         self.user_embedding = tf.nn.embedding_lookup(params=self.U, ids=self.u_idx)
         self.item_embedding = tf.nn.embedding_lookup(params=self.V, ids=self.v_idx)
 
-    def updateLearningRate(self,iter):
+    def updateLearningRate(self, iter):
         if iter > 1:
             if abs(self.lastLoss) > abs(self.loss):
                 self.lRate *= 1.05
@@ -71,29 +73,30 @@ class IterativeRecommender(Recommender):
         else:
             return self.data.globalMean
 
-    def predictForRanking(self,u):
+    def predictForRanking(self, u):
         'used to rank all the items for the user'
         if self.data.containsUser(u):
             return self.Q.dot(self.P[self.data.user[u]])
         else:
-            return [self.data.globalMean]*self.num_items
+            return [self.data.globalMean] * self.num_items
 
-    def isConverged(self,iter):
+    def isConverged(self, iter):
         from math import isnan
         if isnan(self.loss):
-            print('Loss = NaN or Infinity: current settings does not fit the recommender! Change the settings and try again!')
+            print(
+                'Loss = NaN or Infinity: current settings does not fit the recommender! Change the settings and try again!')
             exit(-1)
-        deltaLoss = (self.lastLoss-self.loss)
+        deltaLoss = (self.lastLoss - self.loss)
         if self.ranking.isMainOn():
             print('%s %s iteration %d: loss = %.4f, delta_loss = %.5f learning_Rate = %.5f' \
                   % (self.algorName, self.foldInfo, iter, self.loss, deltaLoss, self.lRate))
-            #measure = self.ranking_performance(iter)
+            # measure = self.ranking_performance(iter)
         else:
             measure = self.rating_performance()
             print('%s %s iteration %d: loss = %.4f, delta_loss = %.5f learning_Rate = %.5f %5s %5s' \
                   % (self.algorName, self.foldInfo, iter, self.loss, deltaLoss, self.lRate, measure[0].strip()[:11],
                      measure[1].strip()[:12]))
-        #check if converged
+        # check if converged
         cond = abs(deltaLoss) < 1e-3
         converged = cond
         if not converged:
@@ -109,7 +112,7 @@ class IterativeRecommender(Recommender):
             # predict
             prediction = self.predictForRating(user, item)
             pred = self.checkRatingBoundary(prediction)
-            res.append([user,item,rating,pred])
+            res.append([user, item, rating, pred])
         self.measure = Measure.ratingMeasure(res)[0]
         return self.measure
 
@@ -134,19 +137,19 @@ class IterativeRecommender(Recommender):
             ids, scores = find_k_largest(N, candidates)
             item_names = [self.data.id2item[iid] for iid in ids]
             recList[user] = list(zip(item_names, scores))
-        measure = Measure.rankingMeasure(testSample, recList, [20])
-        if len(self.bestPerformance)>0:
+        measure = Measure.rankingMeasure(testSample, recList, [20])[0]
+        if len(self.bestPerformance) > 0:
             count = 0
             performance = {}
             for m in measure[1:]:
-                k,v = m.strip().split(':')
-                performance[k]=float(v)
+                k, v = m.strip().split(':')
+                performance[k] = float(v)
             for k in self.bestPerformance[1]:
                 if self.bestPerformance[1][k] > performance[k]:
                     count += 1
                 else:
-                    count -=1
-            if count<0:
+                    count -= 1
+            if count < 0:
                 self.bestPerformance[1] = performance
                 self.bestPerformance[0] = iteration
                 self.saveModel()
@@ -154,19 +157,19 @@ class IterativeRecommender(Recommender):
             self.bestPerformance.append(iteration)
             performance = {}
             for m in measure[1:]:
-                k,v = m.strip().split(':')
-                performance[k]=float(v)
+                k, v = m.strip().split(':')
+                performance[k] = float(v)
                 self.bestPerformance.append(performance)
             self.saveModel()
-        print('-'*120)
-        print('Quick Ranking Performance '+self.foldInfo+' (Top-10 Item Recommendation On 1000 sampled users)')
+        print('-' * 120)
+        print('Quick Ranking Performance ' + self.foldInfo + ' (Top-10 Item Recommendation On 1000 sampled users)')
         measure = [m.strip() for m in measure[1:]]
         print('*Current Performance*')
         print('iteration:', iteration, ' | '.join(measure))
         bp = ''
         # for k in self.bestPerformance[1]:
         #     bp+=k+':'+str(self.bestPerformance[1][k])+' | '
-        bp += 'Precision'+':'+str(self.bestPerformance[1]['Precision'])+' | '
+        bp += 'Precision' + ':' + str(self.bestPerformance[1]['Precision']) + ' | '
         bp += 'Recall' + ':' + str(self.bestPerformance[1]['Recall']) + ' | '
         bp += 'F1' + ':' + str(self.bestPerformance[1]['F1']) + ' | '
         bp += 'MDCG' + ':' + str(self.bestPerformance[1]['NDCG'])
@@ -174,4 +177,3 @@ class IterativeRecommender(Recommender):
         print('iteration:', self.bestPerformance[0], bp)
         print('-' * 120)
         return measure
-
